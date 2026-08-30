@@ -1,8 +1,9 @@
 /**
  * @aitp/adapter-codex — Codex discovery/parsing (SCANNING_SPEC §6).
- * Includes AGENTS.md override/fallback chain with load order (RULE-001).
+ * v0.1.1: summaries are whitelisted DTOs (PRI-02), structured sourceIdentity
+ * (FUN-02) and a real filesystem AGENTS chain (FUN-01).
  */
-import { join, resolve, dirname } from 'node:path';
+import { join } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import type {
   Candidate,
@@ -11,6 +12,7 @@ import type {
   ParseResult,
   ProviderAdapter,
   ScanContext,
+  SourceIdentityValue,
 } from '@aitp/contracts';
 import {
   buildObservation,
@@ -23,15 +25,18 @@ import {
   walkBounded,
 } from '@aitp/inventory-core';
 import { redactObject } from '@aitp/security';
+import { buildAgentsChainFromFs, isLoadedInContext, chainDirs } from './agents-chain.js';
 
-export const CODEX_ADAPTER_VERSION = '1.0.0';
+export const CODEX_ADAPTER_VERSION = '1.1.0';
+export { chainDirs, buildAgentsChainFromFs, buildAgentsChainFromFs as buildAgentsChain };
+export type { AgentsChain, AgentsChainEntry } from './agents-chain.js';
 
 function readFailureDiagnostic(
   provider: 'codex',
   target: string,
   kind: 'access-denied' | 'too-large' | 'missing',
   message: string,
-): { code: 'ACCESS_DENIED' | 'FILE_TOO_LARGE' | 'ROOT_NOT_FOUND'; severity: 'warning' | 'info'; provider: string; target: string; message: string; recovery: string } {
+): DiagnosticValue {
   if (kind === 'access-denied') {
     return { code: 'ACCESS_DENIED', severity: 'warning', provider, target, message, recovery: 'Grant read permission or exclude this root from scanning.' };
   }
@@ -41,6 +46,12 @@ function readFailureDiagnostic(
   return { code: 'ROOT_NOT_FOUND', severity: 'info', provider, target, message, recovery: 'Verify the file exists at scan time.' };
 }
 
+function identityFromSourceField(source: unknown): SourceIdentityValue | undefined {
+  if (typeof source === 'string' && /^https:\/\//.test(source)) {
+    return { type: 'git', canonicalUrl: source.replace(/\.git$/, '') };
+  }
+  return undefined;
+}
 
 export class CodexAdapter implements ProviderAdapter {
   id = 'codex' as const;
@@ -65,16 +76,8 @@ export class CodexAdapter implements ProviderAdapter {
     }
     for (const dir of chainDirs(context.cwd, context.repoRoot)) {
       for (const skillDir of await findSkillDirs(join(dir, '.agents', 'skills'), context)) {
-        yield {
-          provider: this.id,
-          kind: 'skill',
-          scope: dir === context.repoRoot ? 'repo' : 'repo',
-          name: skillDir.name,
-          absolutePath: skillDir.path,
-          copyRole: 'source',
-        };
+        yield { provider: this.id, kind: 'skill', scope: 'repo', name: skillDir.name, absolutePath: skillDir.path, copyRole: 'source' };
       }
-      // AGENTS.md chain documents.
       for (const name of ['AGENTS.override.md', 'AGENTS.md']) {
         const p = join(dir, name);
         if (await exists(p)) {
@@ -143,13 +146,13 @@ export class CodexAdapter implements ProviderAdapter {
       }
       const fm = parseFrontmatter(text);
       if (fm.error) diagnostics.push({ code: 'INVALID_FRONTMATTER', severity: 'warning', provider: 'codex', target: pathToken, message: fm.error });
+      // PRI-02: whitelisted summary — raw frontmatter is never persisted.
       const built = buildObservation({
         candidate,
         contentHash: sha256Hex(text),
         summary: {
           name: String(fm.frontmatter.name ?? candidate.name),
           description: typeof fm.frontmatter.description === 'string' ? fm.frontmatter.description : '',
-          frontmatter: fm.frontmatter,
         },
         sourceEvidence: [{ type: 'manifest', origin: pathToken }],
         discoveredAt,
@@ -164,16 +167,17 @@ export class CodexAdapter implements ProviderAdapter {
         diagnostics.push(readFailureDiagnostic('codex', pathToken, await classifyReadFailure(candidate.absolutePath), 'rule document unreadable'));
         return { observations: [], diagnostics };
       }
-      const chain = buildAgentsChain(context);
-      const loaded = chain.some((c) => c.document.toLowerCase() === candidate.name.toLowerCase() && candidate.absolutePath.toLowerCase().startsWith(c.dir.toLowerCase()));
+      const chain = await buildAgentsChainFromFs(context);
+      const loaded = isLoadedInContext(chain, candidate.absolutePath, context);
       const built = buildObservation({
         candidate,
         contentHash: sha256Hex(text),
         summary: {
           role: candidate.name === 'AGENTS.override.md' ? 'override' : 'fallback',
           loadedInContext: loaded,
-          chain,
+          chain: chain.entries,
           lines: text.split('\n').length,
+          document: candidate.name,
         },
         sourceEvidence: [{ type: 'git-worktree', origin: pathToken }],
         discoveredAt,
@@ -195,12 +199,11 @@ export class CodexAdapter implements ProviderAdapter {
         diagnostics.push({ code: 'INVALID_MANIFEST', severity: 'error', provider: 'codex', target: pathToken, message: `invalid TOML: ${String(e)}` });
         return { observations: [], diagnostics };
       }
-      const redacted = redactObject(config);
-      const hooks = redacted.value.hooks ?? redacted.value;
+      const redacted = redactObject(config.hooks ?? config);
       const built = buildObservation({
         candidate,
         contentHash: sha256Hex(text),
-        summary: { events: hooks, owner: 'settings', trust: 'unknown' },
+        summary: { events: redacted.value, owner: 'settings', trust: 'unknown' },
         sourceEvidence: [{ type: 'manifest', origin: pathToken }],
         discoveredAt,
         locationToken: pathToken,
@@ -211,7 +214,7 @@ export class CodexAdapter implements ProviderAdapter {
     // plugin / marketplace manifests.
     const text = await readTextCapped(candidate.absolutePath);
     if (text === undefined) {
-      diagnostics.push({ code: 'INVALID_MANIFEST', severity: 'error', provider: 'codex', target: pathToken, message: 'manifest missing' });
+      diagnostics.push(readFailureDiagnostic('codex', pathToken, await classifyReadFailure(candidate.absolutePath), 'manifest unreadable'));
       return { observations: [], diagnostics };
     }
     let manifest: Record<string, unknown>;
@@ -222,47 +225,30 @@ export class CodexAdapter implements ProviderAdapter {
       return { observations: [], diagnostics };
     }
     const name = String(manifest.name ?? candidate.name);
+    // PRI-02: whitelisted manifest DTO; FUN-02: structured source identity.
+    const sourceIdentity = identityFromSourceField(manifest.source) ?? { type: 'unknown' as const };
+    const summary =
+      candidate.kind === 'plugin'
+        ? {
+            manifestName: name,
+            version: manifest.version === undefined ? 'unknown' : String(manifest.version),
+            description: typeof manifest.description === 'string' ? manifest.description : '',
+          }
+        : {
+            manifestName: name,
+            pluginNames: Array.isArray(manifest.plugins) ? manifest.plugins.map((p) => String((p as Record<string, unknown>).name ?? '')) : [],
+          };
     const built = buildObservation({
       candidate: { ...candidate, name },
       contentHash: canonicalJsonHash(manifest),
-      summary: { manifestName: name, version: manifest.version === undefined ? 'unknown' : String(manifest.version), manifest },
+      summary,
+      sourceIdentity,
       sourceEvidence: [{ type: 'manifest', origin: pathToken }],
       discoveredAt,
       locationToken: pathToken,
     });
     return { observations: [built.observation], diagnostics };
   }
-}
-
-/** Directories from CWD up to the Git root, nearest first (SCANNING_SPEC §6). */
-export function chainDirs(cwd: string, repoRoot: string): string[] {
-  const out: string[] = [];
-  let current = resolve(cwd);
-  const root = resolve(repoRoot);
-  for (let i = 0; i < 32; i++) {
-    out.push(current);
-    if (current.toLowerCase() === root.toLowerCase()) break;
-    const parent = dirname(current);
-    if (parent === current) break;
-    if (!root.toLowerCase().startsWith(parent.toLowerCase())) break; // parent is above root
-    current = parent;
-  }
-  return out;
-}
-
-/** AGENTS.md chain: git root → CWD, override beats fallback per directory. */
-export function buildAgentsChain(context: ScanContext): Array<{ dir: string; document: string; excluded: string[] }> {
-  const chain: Array<{ dir: string; document: string; excluded: string[] }> = [];
-  for (const dir of chainDirs(context.cwd, context.repoRoot)) {
-    const hasOverride = dir === context.repoRoot;
-    void hasOverride;
-    chain.push({
-      dir,
-      document: 'AGENTS.override.md',
-      excluded: ['AGENTS.md'],
-    });
-  }
-  return chain;
 }
 
 async function findSkillDirs(root: string, context: ScanContext): Promise<Array<{ name: string; path: string }>> {

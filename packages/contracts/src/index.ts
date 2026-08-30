@@ -70,6 +70,15 @@ export const ParserInfo = z.object({
 export type ParserInfoValue = z.infer<typeof ParserInfo>;
 
 /** ARCHITECTURE §5 Observation — one machine fact. */
+export const SourceIdentity = z.object({
+  type: z.enum(['git', 'marketplace', 'local-authored', 'unknown']),
+  canonicalUrl: z.string().optional(),
+  marketplaceId: z.string().optional(),
+  packageId: z.string().optional(),
+  revision: z.string().optional(),
+});
+export type SourceIdentityValue = z.infer<typeof SourceIdentity>;
+
 export const Observation = z.object({
   observationId: z.string(),
   artifactId: z.string(),
@@ -78,6 +87,7 @@ export const Observation = z.object({
   scope: z.enum(['user', 'repo', 'local', 'managed', 'system', 'plugin']),
   canonicalName: z.string(),
   displayName: z.string().optional(),
+  sourceIdentity: SourceIdentity.default({ type: 'unknown' }),
   location: LocalPathRef,
   copyRole: z.enum(['source', 'install', 'cache', 'declared', 'unknown']).default('unknown'),
   enabled: z.boolean().or(z.literal('unknown')).default('unknown'),
@@ -292,6 +302,10 @@ export interface InventoryStore {
   listDiagnostics(runId: string): Promise<DiagnosticValue[]>;
   saveProposal(proposal: AnalysisProposalValue): Promise<void>;
   listProposals(artifactId?: string): Promise<AnalysisProposalValue[]>;
+  /** PRI-002: retention metadata for the privacy page. */
+  listRuns(): Promise<ScanRun[]>;
+  clearHistory(): Promise<void>;
+  clearProposals(): Promise<void>;
 }
 
 export interface CatalogStore {

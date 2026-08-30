@@ -85,6 +85,10 @@ export async function walkBounded(
 /** Read a file as text with size cap; returns undefined when missing/too large. */
 export async function readTextCapped(path: string, maxBytes = MAX_FILE_BYTES): Promise<string | undefined> {
   try {
+    // SEC-005: check the size BEFORE reading so oversized files never hit the
+    // process memory — the limit is a real read bound, not a post-check.
+    const stat = await fs.stat(path);
+    if (stat.size > maxBytes) return undefined;
     const buf = await fs.readFile(path);
     if (buf.byteLength > maxBytes) return undefined;
     return buf.toString('utf8');

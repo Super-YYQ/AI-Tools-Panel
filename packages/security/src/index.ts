@@ -184,3 +184,5 @@ export function checkVendoring(
   }
   return { allowed, blocked };
 }
+
+export * from './safe-path.js';

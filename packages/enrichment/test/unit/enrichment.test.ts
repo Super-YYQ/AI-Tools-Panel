@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { validateProposalOutput, buildPayload, runEnrichmentJob, wrapAsQuotedData } from '@aitp/enrichment';
+import { validateProposalOutput, buildPayload, runEnrichmentJob, wrapAsQuotedData, ENRICHMENT_TASKS } from '@aitp/enrichment';
 import type { ObservationValue } from '@aitp/contracts';
 
-// AI-001..006; M6-06/07; gate 8.
+// AI-001..006; M6-06/07; gate 8; P1-PRI-05 per-task payload allowlists.
 describe('proposal output validation (AI-003, AI-006)', () => {
   it('accepts claims for allowed fields with evidence', () => {
     const r = validateProposalOutput({
@@ -22,35 +22,95 @@ describe('proposal output validation (AI-003, AI-006)', () => {
   });
 });
 
+const baseObs: ObservationValue = {
+  observationId: 'o',
+  artifactId: 'a',
+  provider: 'claude-code',
+  kind: 'skill',
+  scope: 'repo',
+  canonicalName: 'x',
+  sourceIdentity: { type: 'git', canonicalUrl: 'https://github.com/example/skills', revision: 'abc' },
+  location: { pathToken: 'C:\\Users\\yan\\secret\\path', scope: 'repo' },
+  copyRole: 'source',
+  enabled: 'unknown',
+  contentHash: 'h',
+  summary: { name: 'x', description: 'd', version: '1.0', scripts: ['run.sh'], resourceFiles: ['a.md'], manifestName: 'x' },
+  sourceEvidence: [],
+  related: [],
+  discoveredAt: 't',
+  parser: { name: 'p', version: '1' },
+};
+
+describe('per-task payload allowlists (P1-PRI-05, AI-002)', () => {
+  it('summary task sends text fields but never script inventories', () => {
+    const { payload } = buildPayload([baseObs], 'summary');
+    const rec = (payload.records as Array<Record<string, unknown>>)[0]!;
+    const summary = rec.summary as Record<string, unknown>;
+    expect(summary).toMatchObject({ name: 'x', description: 'd' });
+    expect(summary.scripts).toBeUndefined();
+    expect(summary.resourceFiles).toBeUndefined();
+  });
+
+  it('rule-classification task sends document metadata but no descriptions', () => {
+    const { payload } = buildPayload([{ ...baseObs, kind: 'rule-document', summary: { document: 'AGENTS.md', role: 'project', lines: 5, description: 'secret-ish' } }], 'rule-classification');
+    const rec = (payload.records as Array<Record<string, unknown>>)[0]!;
+    const summary = rec.summary as Record<string, unknown>;
+    expect(summary).toMatchObject({ document: 'AGENTS.md', role: 'project', lines: 5 });
+    expect(summary.description).toBeUndefined();
+  });
+
+  it('local-import-suggestion task sends file inventories but no source identity', () => {
+    const { payload } = buildPayload([baseObs], 'local-import-suggestion');
+    const rec = (payload.records as Array<Record<string, unknown>>)[0]!;
+    expect(rec.scope).toBe('repo');
+    expect(rec.summary).toMatchObject({ scripts: ['run.sh'] });
+    expect(rec.sourceIdentity).toBeUndefined();
+  });
+
+  it('source-candidates task includes structured identity only', () => {
+    const { payload } = buildPayload([baseObs], 'source-candidates');
+    const rec = (payload.records as Array<Record<string, unknown>>)[0]!;
+    expect(rec.sourceIdentity).toMatchObject({ type: 'git' });
+    expect(rec.scope).toBeUndefined();
+    const summary = rec.summary as Record<string, unknown>;
+    expect(summary.description).toBeUndefined();
+  });
+
+  it('digest is stable per task but differs across tasks', () => {
+    const a = buildPayload([baseObs], 'summary');
+    const a2 = buildPayload([baseObs], 'summary');
+    const b = buildPayload([baseObs], 'local-import-suggestion');
+    expect(a.digest).toBe(a2.digest);
+    expect(a.digest).not.toBe(b.digest);
+  });
+});
+
 describe('payload minimization (AI-002, gate 4)', () => {
   const obs: ObservationValue = {
-    observationId: 'o',
-    artifactId: 'a',
-    provider: 'claude-code',
-    kind: 'skill',
-    scope: 'user',
-    canonicalName: 'x',
-    location: { pathToken: 'C:\\Users\\yan\\secret\\path', scope: 'user' },
-    copyRole: 'source',
-    enabled: 'unknown',
-    contentHash: 'h',
+    ...baseObs,
     summary: { description: 'd', apiKey: 'AKIAIOSFODNN7EXAMPLE' },
-    sourceEvidence: [],
-    related: [],
-    discoveredAt: 't',
-    parser: { name: 'p', version: '1' },
   };
 
-  it('omits paths and redacts secrets before any network call', () => {
-    const { payload, warnings } = buildPayload([obs], 'summary');
+  it('omits paths and drops non-allowlisted secret fields before any network call', () => {
+    const { payload } = buildPayload([obs], 'summary');
     const s = JSON.stringify(payload);
     expect(s).not.toContain('yan');
+    // apiKey is not on the summary allowlist — dropped entirely, no redaction needed.
     expect(s).not.toContain('AKIAIOSFODNN7EXAMPLE');
+  });
+
+  it('redacts secrets that travel inside allowlisted fields', () => {
+    const { payload, warnings } = buildPayload(
+      [{ ...obs, summary: { name: 'x', description: 'token ghp_exampletokenvalue0000000000 inside' } }],
+      'summary',
+    );
+    const s = JSON.stringify(payload);
+    expect(s).not.toContain('ghp_exampletokenvalue');
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  it('digest is stable', () => {
-    expect(buildPayload([obs], 'summary').digest).toBe(buildPayload([obs], 'summary').digest);
+  it('exposes all tasks for the UI', () => {
+    expect(ENRICHMENT_TASKS.length).toBe(5);
   });
 });
 

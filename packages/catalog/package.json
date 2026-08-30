@@ -11,10 +11,13 @@
   "dependencies": {
     "@aitp/contracts": "*",
     "@aitp/security": "*",
-    "diff": "^7.0.0",
+    "diff": "^9.0.0",
     "yaml": "^2.6.1"
   },
-  "devDependencies": {
-    "@types/diff": "^7.0.0"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   }
 }

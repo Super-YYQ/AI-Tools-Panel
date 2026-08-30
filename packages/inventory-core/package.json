@@ -12,5 +12,11 @@
     "@aitp/contracts": "*",
     "@aitp/security": "*",
     "yaml": "^2.6.1"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   }
 }

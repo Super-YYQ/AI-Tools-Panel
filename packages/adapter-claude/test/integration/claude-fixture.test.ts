@@ -91,8 +91,10 @@ describe('parse', () => {
     const candidates = await collect();
     const mkt = candidates.find((c) => c.kind === 'marketplace')!;
     const result = await adapter.parse(mkt, context);
-    const plugins = (result.observations[0]!.summary.manifest as { plugins: unknown[] }).plugins;
-    expect(plugins).toHaveLength(2);
+    // PRI-02: whitelisted summary — names only, raw manifest not persisted.
+    const summary = result.observations[0]!.summary as { pluginNames?: string[]; manifest?: unknown };
+    expect(summary.pluginNames).toHaveLength(2);
+    expect(summary.manifest).toBeUndefined();
   });
 
   it('same input produces identical observation IDs and hashes (NFR-001)', async () => {

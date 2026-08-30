@@ -15,7 +15,7 @@
     "build": "tsc -b . && npm run build --workspace @aitp/panel",
     "clean": "node scripts/clean.mjs",
     "lint": "eslint packages apps",
-    "typecheck": "tsc -b . --dry || tsc -b .",
+    "typecheck": "tsc -b .",
     "test": "vitest run",
     "test:integration": "vitest run integration",
     "test:e2e": "playwright test",
@@ -26,6 +26,7 @@
     "license:report": "node scripts/license-report.mjs",
     "artifact:audit": "node scripts/artifact-audit.mjs",
     "sbom:generate": "node scripts/sbom.mjs",
+    "package:portable": "node scripts/package-portable.mjs",
     "docs:check": "node scripts/docs-check.mjs",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run schema:check && npm run build",
     "dev:agent": "node --import tsx apps/local-agent/src/main.ts",
@@ -42,7 +43,8 @@
     "eslint": "^9.17.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.8"
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
   },
   "dependencies": {
     "@fastify/static": "^10.1.3"

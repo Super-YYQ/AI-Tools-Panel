@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { CodexAdapter, chainDirs, buildAgentsChain } from '@aitp/adapter-codex';
+import { CodexAdapter, chainDirs, buildAgentsChainFromFs } from '@aitp/adapter-codex';
 import type { Candidate, ScanContext } from '@aitp/contracts';
 
 // SCAN-002 for the Codex adapter (SCANNING_SPEC §6).
@@ -28,16 +28,24 @@ async function collect(): Promise<Candidate[]> {
 }
 
 describe('AGENTS.md chain (RULE-001, SCAN-002)', () => {
-  it('walks from CWD to Git root', () => {
+  it('walks from CWD to Git root, root-first (load order)', () => {
     const dirs = chainDirs(join(repo, 'sub'), repo);
-    expect(dirs[dirs.length - 1]!.toLowerCase()).toBe(repo.toLowerCase());
+    expect(dirs[0]!.toLowerCase()).toBe(repo.toLowerCase());
     expect(dirs.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('records override beats fallback per directory', () => {
-    const chain = buildAgentsChain(context);
-    expect(chain.length).toBeGreaterThanOrEqual(2);
-    expect(chain.every((c) => c.document === 'AGENTS.override.md')).toBe(true);
+  it('records override beats fallback per directory from the real filesystem (FUN-01)', async () => {
+    const chain = await buildAgentsChainFromFs(context);
+    // <user> + repo root + sub
+    expect(chain.entries.length).toBeGreaterThanOrEqual(3);
+    const rootEntry = chain.entries.find((e) => e.dirToken === '.')!;
+    expect(rootEntry.selected).toBe('AGENTS.md');
+    expect(rootEntry.excluded).toEqual([]);
+    const subEntry = chain.entries.find((e) => e.dirToken === 'sub')!;
+    expect(subEntry.selected).toBe('AGENTS.override.md');
+    expect(subEntry.excluded).toEqual(['AGENTS.md']);
+    // No absolute machine paths leak into chain tokens (PRI-001).
+    expect(JSON.stringify(chain)).not.toContain(repo.slice(0, 12));
   });
 });
 
@@ -62,9 +70,13 @@ describe('discover + parse', () => {
     const candidates = await collect();
     const overrideDoc = candidates.find((c) => c.name === 'AGENTS.override.md')!;
     const result = await adapter.parse(overrideDoc, context);
-    const summary = result.observations[0]!.summary as { loadedInContext?: boolean; chain?: unknown[] };
+    const summary = result.observations[0]!.summary as { loadedInContext?: boolean; chain?: Array<{ dirToken: string; selected: string | null }>; manifest?: unknown };
     expect(summary.loadedInContext).toBe(true);
     expect(Array.isArray(summary.chain)).toBe(true);
+    // Chain tokens are repo-relative or '<user>' — never absolute paths.
+    expect(summary.chain!.every((e) => !e.dirToken.includes(':'))).toBe(true);
+    // PRI-02: raw frontmatter is not persisted.
+    expect(summary.manifest).toBeUndefined();
   });
 
   it('is deterministic across runs (NFR-001)', async () => {

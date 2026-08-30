@@ -12,5 +12,11 @@
     "@aitp/contracts": "*",
     "@aitp/inventory-core": "*",
     "@aitp/security": "*"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   }
 }

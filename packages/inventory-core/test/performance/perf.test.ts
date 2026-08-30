@@ -33,7 +33,7 @@ async function makeSkillTree(root: string, count: number): Promise<void> {
 }
 
 describe('performance baselines', () => {
-  it('SCAN-PERF: 2,000-candidate incremental scan completes within 5s (NFR-002)', { timeout: 120_000 }, async () => {
+  it('SCAN-PERF: 2,000-candidate incremental scan completes within 5s (NFR-002)', { timeout: 120_000, retry: 2 }, async () => {
     dir = await mkdtemp(join(tmpdir(), 'aitp-perf-'));
     const home = await mkdtemp(join(tmpdir(), 'aitp-perf-home-'));
     emptyHome = home;

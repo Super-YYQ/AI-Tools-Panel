@@ -48,20 +48,40 @@ export function validateProposalOutput(raw: unknown): { ok: true; claims: Array<
   return { ok: true, claims: parsed.data.claims as Array<{ field: string; value: unknown; confidence: number; evidence: unknown[] }> };
 }
 
+/**
+ * P1-PRI-05: per-task field allowlists. Each task receives only the fields it
+ * needs — the full summary is never sent as a generic input (AI-002).
+ */
+const TASK_FIELDS: Record<EnrichmentTask, { top: string[]; summary: string[] }> = {
+  summary: { top: ['kind', 'canonicalName'], summary: ['name', 'description', 'version'] },
+  tags: { top: ['kind', 'canonicalName'], summary: ['name', 'description'] },
+  'rule-classification': { top: ['kind', 'canonicalName'], summary: ['document', 'role', 'lines'] },
+  'source-candidates': { top: ['kind', 'canonicalName', 'sourceIdentity'], summary: ['manifestName'] },
+  'local-import-suggestion': { top: ['kind', 'canonicalName', 'scope'], summary: ['name', 'scripts', 'resourceFiles'] },
+};
+
 /** Minimal redacted payload for a task; only scan-derived data leaves the machine (AI-002). */
-export function buildPayload(observations: ObservationValue[], task: EnrichmentTask): { payload: Record<string, unknown>; digest: string; warnings: string[] } {
-  const minimal = observations.map((o) => ({
-    kind: o.kind,
-    canonicalName: o.canonicalName,
-    summary: o.summary,
-    scope: o.scope,
-  }));
+export function buildPayload(observations: ObservationValue[], task: EnrichmentTask): { payload: Record<string, unknown>; digest: string; warnings: string[]; fields: string[] } {
+  const allow = TASK_FIELDS[task] ?? TASK_FIELDS.summary;
+  const minimal = observations.map((o) => {
+    const record: Record<string, unknown> = {};
+    for (const key of allow.top) {
+      if ((o as unknown as Record<string, unknown>)[key] !== undefined) record[key] = (o as unknown as Record<string, unknown>)[key];
+    }
+    const summarySubset: Record<string, unknown> = {};
+    for (const key of allow.summary) {
+      if (o.summary && o.summary[key] !== undefined) summarySubset[key] = o.summary[key];
+    }
+    record.summary = summarySubset;
+    return record;
+  });
   const redacted = redactObject(minimal);
   const payload = { task, records: redacted.value };
   return {
     payload,
     digest: createHash('sha256').update(JSON.stringify(payload)).digest('hex'),
     warnings: redacted.redactions.length > 0 ? [`redacted: ${redacted.redactions.join(', ')}`] : [],
+    fields: allow.top,
   };
 }
 

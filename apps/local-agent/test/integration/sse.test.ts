@@ -10,7 +10,8 @@ import { CodexAdapter } from '@aitp/adapter-codex';
 import type { StartedServer } from '../../src/main.js';
 
 const execAsync = promisify(execFile);
-// M3-03 SSE: GET /scans/:id/events streams progress and terminal state; session required.
+// M3-03 SSE: GET /scans/:id/events streams progress + terminal state; the
+// session arrives via header — never a URL query token (SEC-003).
 let repo: string;
 let started: StartedServer;
 const fixture = resolve(__dirname, '../../../../tests/fixtures');
@@ -30,8 +31,8 @@ afterEach(async () => {
 
 function readSSE(scanId: string, session: string): Promise<{ status: number; contentType: string; body: string }> {
   return new Promise((resolvePromise, reject) => {
-    fetch(`http://127.0.0.1:${started.port}/api/v1/scans/${scanId}/events?session=${session}`, {
-      headers: { accept: 'text/event-stream' },
+    fetch(`http://127.0.0.1:${started.port}/api/v1/scans/${scanId}/events`, {
+      headers: { accept: 'text/event-stream', 'x-aitp-session': session },
     }).then((res) => {
       const contentType = res.headers.get('content-type') ?? '';
       const reader = res.body?.getReader();
@@ -64,19 +65,25 @@ function readSSE(scanId: string, session: string): Promise<{ status: number; con
   });
 }
 
+async function startScan(): Promise<string> {
+  const scanRes = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans`, {
+    method: 'POST',
+    headers: { 'x-aitp-session': started.sessionToken },
+  });
+  expect(scanRes.status).toBe(202);
+  const { scanId } = (await scanRes.json()) as { scanId: string };
+  return scanId;
+}
+
 describe('SSE scan events (M3-03, ARCHITECTURE §8)', () => {
-  it('rejects unauthenticated streams (SSE requires session)', async () => {
-    const scanRes = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans`, { method: 'POST' });
-    expect(scanRes.status).toBe(401);
+  it('rejects unauthenticated event streams — including query-token fallback', async () => {
+    const scanId = await startScan();
+    const res = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans/${scanId}/events?session=${started.sessionToken}`);
+    expect(res.status).toBe(401);
   });
 
   it('streams progress and done with counts for a started scan', async () => {
-    const scanRes = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans`, {
-      method: 'POST',
-      headers: { 'x-aitp-session': started.sessionToken },
-    });
-    expect(scanRes.status).toBe(202);
-    const { scanId } = (await scanRes.json()) as { scanId: string };
+    const scanId = await startScan();
     const stream = await readSSE(scanId, started.sessionToken);
     expect(stream.contentType).toContain('text/event-stream');
     expect(stream.body).toContain('event: done');
@@ -88,16 +95,11 @@ describe('SSE scan events (M3-03, ARCHITECTURE §8)', () => {
   });
 
   it('replays buffered events for late subscribers after terminal state', async () => {
-    const scanRes = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans`, {
-      method: 'POST',
-      headers: { 'x-aitp-session': started.sessionToken },
-    });
-    const { scanId } = (await scanRes.json()) as { scanId: string };
-    // Wait for the scan to finish, then connect — must still receive done.
+    const scanId = await startScan();
     let run: { status: string } | undefined;
     for (let i = 0; i < 100; i++) {
       await new Promise((r) => setTimeout(r, 200));
-      run = (await (await fetch(`http://127.0.0.1:${started.port}/api/v1/scans/${scanId}`)).json()) as { status: string };
+      run = (await (await fetch(`http://127.0.0.1:${started.port}/api/v1/scans/${scanId}`, { headers: { 'x-aitp-session': started.sessionToken } })).json()) as { status: string };
       if (['completed', 'partial', 'failed', 'cancelled'].includes(run.status)) break;
     }
     const stream = await readSSE(scanId, started.sessionToken);
@@ -105,7 +107,7 @@ describe('SSE scan events (M3-03, ARCHITECTURE §8)', () => {
   });
 
   it('returns 404 for unknown scan ids', async () => {
-    const res = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans/none/events?session=${started.sessionToken}`);
+    const res = await fetch(`http://127.0.0.1:${started.port}/api/v1/scans/none/events`, { headers: { 'x-aitp-session': started.sessionToken } });
     expect(res.status).toBe(404);
   });
 });

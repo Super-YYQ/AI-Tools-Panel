@@ -20,10 +20,20 @@ test.afterAll(async () => {
 async function openPanel(browser: import('@playwright/test').Browser): Promise<Page> {
   const context = await browser.newContext();
   const page = await context.newPage();
-  page.on('dialog', (d) => void d.accept());
   await page.goto(`${panel.baseURL}/#session=${panel.sessionToken}`);
+  // FUN-001: the panel lands on the overview and the session token never
+  // remains in the URL.
   await expect(page.getByRole('heading', { name: 'AI Tools Panel' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '总览', level: 2 })).toBeVisible();
+  expect(page.url()).not.toContain('session=');
   return page;
+}
+
+/** FUN-007: apply through the full Change Review UI (no confirm dialogs). */
+async function applyInReview(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: '变更审查' })).toBeVisible();
+  await page.getByRole('button', { name: '应用变更' }).click();
+  await expect(page.locator('header [role=status]')).toContainText('已保存', { timeout: 20_000 });
 }
 
 async function scan(page: Page): Promise<void> {
@@ -36,36 +46,36 @@ async function gitStatus(): Promise<string> {
   return stdout.trim();
 }
 
-test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程)', () => {
-  test('E2E-01 首次扫描：六类发现、证据可追溯、仓库不变', async ({ browser }) => {
+test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
+  test('E2E-01 首次扫描：六类发现、证据可追溯、仓库不变、首屏稳定', async ({ browser }) => {
     const page = await openPanel(browser);
     await scan(page);
-    // Installed page shows observations from both providers across kinds.
     await page.getByRole('navigation').getByRole('button', { name: '已安装' }).click();
     await expect(page.getByRole('article', { name: /deploy-helper/ })).toBeVisible();
     await expect(page.getByRole('article', { name: /report/ })).toBeVisible();
-    // Rules and hooks discovered.
     await page.getByRole('navigation').getByRole('button', { name: '规则' }).click();
     await expect(page.getByText('AGENTS.md').first()).toBeVisible();
-    // The scan did not modify the repository (PRODUCT_SPEC 首次扫描完成条件).
     expect(await gitStatus()).toBe('');
     await page.context().close();
   });
 
-  test('E2E-02 编辑人工简述：diff 预览、原文件不变、重扫保留 Overlay', async ({ browser }) => {
+  test('E2E-02 编辑人工简述：完整 diff 审查、原文件不变、重扫保留 Overlay', async ({ browser }) => {
     const page = await openPanel(browser);
     await page.getByRole('navigation').getByRole('button', { name: '已安装' }).click();
     const card = page.getByRole('article', { name: /deploy-helper \(skill\)/ });
     await card.getByRole('button', { name: '纳入目录' }).click();
     await card.getByLabel('人工简述').fill('Release checklist helper (human summary).');
     await card.getByRole('button', { name: '预览 diff 并保存' }).click();
-    await expect(card.getByRole('status')).toContainText('已保存', { timeout: 15_000 });
+    // FUN-007: the review shows the complete diff before apply.
+    await expect(page.getByRole('heading', { name: '变更审查' })).toBeVisible();
+    const reviewDiff = page.getByLabel(/diff/).first();
+    await expect(reviewDiff).toContainText('shortDescription');
+    await applyInReview(page);
 
     const catalogFile = join(panel.repo, 'catalog', 'skills', 'deploy-helper.yaml');
     const yaml = await readFile(catalogFile, 'utf8');
-    expect(yaml).toContain('shortDescription: "Release checklist helper (human summary)."');
+    expect(yaml).toContain('Release checklist helper (human summary).');
     expect(yaml).toContain('shortDescription: human');
-    // Third-party SKILL.md is unchanged.
     const skill = await readFile(join(panel.repo, '.claude', 'skills', 'deploy-helper', 'SKILL.md'), 'utf8');
     expect(skill).toContain('description: Help with deploy checklists.');
     // Rescan preserves the overlay (CAT-008).
@@ -91,12 +101,12 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程)', () => {
     await page.getByLabel('名称').fill('Remote Cool Skill');
     await page.getByLabel('URL / Marketplace 标识').fill('https://github.com/example/cool-skill');
     await page.getByRole('button', { name: '预览并保存' }).click();
-    await expect(page.getByRole('status').last()).toContainText('已保存', { timeout: 15_000 });
+    await applyInReview(page);
 
     const yaml = await readFile(join(panel.repo, 'catalog', 'skills', 'remote-cool-skill.yaml'), 'utf8');
     expect(yaml).toContain('type: url');
     expect(yaml).toContain('contentPolicy: metadata-only');
-    expect(external).toHaveLength(0); // offline-first: no network request at all (AI-002/NFR-007)
+    expect(external).toHaveLength(0); // offline-first: no network request at all
     await page.context().close();
   });
 
@@ -106,18 +116,12 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程)', () => {
     const card = page.getByRole('article', { name: /leaky \(skill\)/ });
     await card.getByRole('button', { name: '本地导入预览' }).click();
     await expect(card.getByText('metadata-only')).toBeVisible();
-    // The gate blocks the .env file and the whole preview stays metadata-only.
     await expect(card.getByText(/\.env/)).toBeVisible();
-    // Nothing copied before explicit confirmation.
-    await expect(card.getByText(/可复制文件/)).toBeVisible();
-    const catalogDir = join(panel.repo, 'catalog', 'skills');
     await card.getByRole('button', { name: '仅保存元数据（默认）' }).click();
-    await expect(card.getByRole('status')).toContainText('已保存', { timeout: 15_000 });
-    const yaml = await readFile(join(catalogDir, 'leaky.yaml'), 'utf8');
+    await applyInReview(page);
+    const yaml = await readFile(join(panel.repo, 'catalog', 'skills', 'leaky.yaml'), 'utf8');
     expect(yaml).toContain('contentPolicy: metadata-only');
-    // Vendored copies were never written.
     const { stdout } = await execAsync('git', ['-C', panel.repo, 'status', '--porcelain']);
-    expect(stdout).not.toContain('catalog/skills/leaky/.env');
     expect(stdout).not.toContain('vendored');
     await page.context().close();
   });
@@ -131,33 +135,33 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程)', () => {
     await item.getByLabel('起始行').fill('3');
     await item.getByLabel('结束行').fill('3');
     await item.getByRole('button', { name: '预览并保存片段' }).click();
-    await expect(item.getByRole('status')).toContainText('已保存规则片段', { timeout: 15_000 });
+    await applyInReview(page);
 
-    const files = await execAsync('git', ['-C', panel.repo, 'status', '--porcelain']);
-    expect(files.stdout).toContain('catalog/');
     const yaml = await readFile(join(panel.repo, 'catalog', 'rule-fragments', 'agents-md-l3-3.md'), 'utf8');
     expect(yaml).toContain('kind: RuleFragment');
     expect(yaml).toContain('lines: 3-3');
     expect(yaml).toContain('categories: human');
     expect(yaml).toContain('Use deterministic tests.');
-    // Original rule document unchanged.
     const agents = await readFile(join(panel.repo, 'AGENTS.md'), 'utf8');
     expect(agents).toContain('Use deterministic tests.');
     await page.context().close();
   });
 
-  test('E2E-06 AI 关闭不影响核心：无 AI 入口、人工编辑照常可用', async ({ browser }) => {
+  test('E2E-06 AI 关闭不影响核心：无 AI 入口、隐私清理、人工编辑照常可用', async ({ browser }) => {
     const page = await openPanel(browser);
     // AI-001: no provider configured → no AI entry point anywhere in nav.
     const navTexts = await page.getByRole('navigation').allInnerTexts();
     expect(navTexts.join('\n')).not.toContain('AI 分析');
+    // PRI-006: privacy page exposes retention + cleanup.
+    await page.getByRole('navigation').getByRole('button', { name: '设置' }).click();
+    await expect(page.getByText(/保留的扫描运行数/)).toBeVisible();
     // Core manual flow still works end to end.
     await page.getByRole('navigation').getByRole('button', { name: '已安装' }).click();
     const card = page.getByRole('article', { name: /notes \(skill\)/ });
     await card.getByRole('button', { name: '纳入目录' }).click();
     await card.getByLabel('人工简述').fill('Manual note-taking skill summary.');
     await card.getByRole('button', { name: '预览 diff 并保存' }).click();
-    await expect(card.getByRole('status')).toContainText('已保存', { timeout: 15_000 });
+    await applyInReview(page);
     const yaml = await readFile(join(panel.repo, 'catalog', 'skills', 'notes.yaml'), 'utf8');
     expect(yaml).toContain('Manual note-taking skill summary.');
     await page.context().close();

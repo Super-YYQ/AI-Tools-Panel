@@ -6,6 +6,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { sanitizeDiagnostics, sanitizeObservations } from '@aitp/inventory-core';
 import type {
   AnalysisProposalValue,
   DiagnosticValue,
@@ -57,6 +58,8 @@ export class SqliteInventoryStore implements InventoryStore {
   }
 
   async saveScanRun(run: ScanRun, observations: ObservationValue[], diagnostics: DiagnosticValue[]): Promise<void> {
+    const sanitized = sanitizeObservations(observations);
+    const sanitizedDiagnostics = sanitizeDiagnostics(diagnostics);
     const tx = this.db.transaction(() => {
       this.db
         .prepare(
@@ -65,11 +68,35 @@ export class SqliteInventoryStore implements InventoryStore {
         )
         .run(run.runId, run.status, run.startedAt, run.finishedAt ?? null, JSON.stringify(run.providers), JSON.stringify(run.counts), JSON.stringify(run.diagnosticCounts));
       const insObs = this.db.prepare('INSERT OR REPLACE INTO observations (observation_id, run_id, artifact_id, data) VALUES (?, ?, ?, ?)');
-      for (const o of observations) insObs.run(o.observationId, run.runId, o.artifactId, JSON.stringify(o));
+      for (const o of sanitized) insObs.run(o.observationId, run.runId, o.artifactId, JSON.stringify(o));
       const insDiag = this.db.prepare('INSERT OR REPLACE INTO diagnostics (run_id, seq, data) VALUES (?, ?, ?)');
-      diagnostics.forEach((d, i) => insDiag.run(run.runId, i, JSON.stringify(d)));
+      sanitizedDiagnostics.forEach((d, i) => insDiag.run(run.runId, i, JSON.stringify(d)));
     });
     tx();
+    this.pruneRetention();
+  }
+
+  /** PRI-002: keep at most 10 successful/partial runs and 30 days of history. */
+  private pruneRetention(): void {
+    const cut = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const keep = this.db
+      .prepare("SELECT run_id FROM scan_runs WHERE status IN ('completed','partial') ORDER BY started_at DESC LIMIT 10")
+      .all() as Array<{ run_id: string }>;
+    const keepIds = new Set(keep.map((r) => r.run_id));
+    const all = this.db.prepare("SELECT run_id, started_at, status FROM scan_runs").all() as Array<{ run_id: string; started_at: string; status: string }>;
+    const removable = all.filter((r) => (keepIds.has(r.run_id) === false || r.started_at < cut) && r.started_at < cut || (r.status !== 'completed' && r.status !== 'partial' && r.started_at < cut));
+    for (const r of removable) {
+      this.db.prepare('DELETE FROM observations WHERE run_id = ?').run(r.run_id);
+      this.db.prepare('DELETE FROM diagnostics WHERE run_id = ?').run(r.run_id);
+      this.db.prepare('DELETE FROM scan_runs WHERE run_id = ?').run(r.run_id);
+    }
+    // Also cap total runs beyond retention window even for kept statuses.
+    const stale = all.filter((r) => r.started_at < cut && !keepIds.has(r.run_id));
+    for (const r of stale) {
+      this.db.prepare('DELETE FROM observations WHERE run_id = ?').run(r.run_id);
+      this.db.prepare('DELETE FROM diagnostics WHERE run_id = ?').run(r.run_id);
+      this.db.prepare('DELETE FROM scan_runs WHERE run_id = ?').run(r.run_id);
+    }
   }
 
   async getLastSuccessfulRun(): Promise<ScanRun | undefined> {
@@ -105,6 +132,19 @@ export class SqliteInventoryStore implements InventoryStore {
       ? (this.db.prepare('SELECT data FROM proposals WHERE artifact_id = ?').all(artifactId) as Array<{ data: string }>)
       : (this.db.prepare('SELECT data FROM proposals').all() as Array<{ data: string }>);
     return rows.map((r) => JSON.parse(r.data) as AnalysisProposalValue);
+  }
+
+  async listRuns(): Promise<ScanRun[]> {
+    const rows = this.db.prepare('SELECT * FROM scan_runs ORDER BY started_at DESC').all() as Array<Record<string, unknown>>;
+    return rows.map(rowToRun);
+  }
+
+  async clearHistory(): Promise<void> {
+    this.db.exec('DELETE FROM observations; DELETE FROM diagnostics; DELETE FROM scan_runs;');
+  }
+
+  async clearProposals(): Promise<void> {
+    this.db.exec('DELETE FROM proposals;');
   }
 
   close(): void {

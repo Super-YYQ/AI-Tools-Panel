@@ -13,6 +13,7 @@ import type {
   ParseResult,
   ProviderAdapter,
   ScanContext,
+  SourceIdentityValue,
 } from '@aitp/contracts';
 import {
   buildObservation,
@@ -26,7 +27,14 @@ import {
 } from '@aitp/inventory-core';
 import { redactObject } from '@aitp/security';
 
-export const CLAUDE_ADAPTER_VERSION = '1.0.0';
+export const CLAUDE_ADAPTER_VERSION = '1.1.0';
+
+function identityFromSourceField(source: unknown): SourceIdentityValue | undefined {
+  if (typeof source === 'string' && /^https:\/\//.test(source)) {
+    return { type: 'git', canonicalUrl: source.replace(/\.git$/, '') };
+  }
+  return undefined;
+}
 
 function readFailureDiagnostic(
   provider: 'claude-code',
@@ -187,10 +195,11 @@ async function parseSkill(
   if (!description) {
     diagnostics.push({ code: 'INVALID_FRONTMATTER', severity: 'warning', provider: 'claude-code', target: pathToken, message: 'description missing', recovery: 'Add a description to SKILL.md frontmatter.' });
   }
+  // PRI-02: whitelisted DTO only — raw frontmatter is never persisted.
   const summary: Record<string, unknown> = {
     name,
     description,
-    frontmatter: fm.frontmatter,
+    version: typeof fm.frontmatter.version === 'string' ? fm.frontmatter.version : undefined,
     resourceFiles: [] as string[],
     scripts: [] as string[],
   };
@@ -252,6 +261,7 @@ async function parseRuleDocument(
     role: candidate.name.includes('local') ? 'local' : 'project',
     imports,
     lines: text.split('\n').length,
+    document: candidate.name,
   };
   const built = buildObservation({
     candidate,
@@ -327,17 +337,27 @@ async function parseManifest(
     return { observations: [], diagnostics };
   }
   const name = String(manifest.name ?? candidate.name);
-  const summary: Record<string, unknown> = {
-    manifestName: name,
-    version: manifest.version === undefined ? 'unknown' : String(manifest.version),
-    description: typeof manifest.description === 'string' ? manifest.description : '',
-    manifest,
-    enabledEvidence: kind === 'plugin' ? 'unknown' : undefined,
-  };
+  // PRI-02: whitelisted manifest DTO — the raw manifest is never persisted.
+  // FUN-02: structured source identity from the manifest source field.
+  const sourceIdentity = identityFromSourceField(manifest.source) ?? { type: 'unknown' as const };
+  const summary: Record<string, unknown> =
+    kind === 'plugin'
+      ? {
+          manifestName: name,
+          version: manifest.version === undefined ? 'unknown' : String(manifest.version),
+          description: typeof manifest.description === 'string' ? manifest.description : '',
+        }
+      : {
+          manifestName: name,
+          pluginNames: Array.isArray(manifest.plugins)
+            ? manifest.plugins.map((p) => String((p as Record<string, unknown>).name ?? ''))
+            : [],
+        };
   const built = buildObservation({
     candidate: { ...candidate, name },
     contentHash: canonicalJsonHash(manifest),
     summary,
+    sourceIdentity,
     sourceEvidence: [{ type: 'manifest', origin: pathToken }],
     discoveredAt,
     locationToken: pathToken,

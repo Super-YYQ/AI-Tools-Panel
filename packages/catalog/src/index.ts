@@ -14,7 +14,7 @@ import type {
   FileChangeValue,
 } from '@aitp/contracts';
 import { API_VERSION, CatalogEntry } from '@aitp/contracts';
-import { checkRepoRelativePath } from '@aitp/security';
+import { checkRepoRelativePath, resolveSafeReadPath, resolveSafeWritePath } from '@aitp/security';
 import { sha256Hex } from './hash.js';
 
 export { sha256Hex, sha256 } from './hash.js';
@@ -203,12 +203,18 @@ export async function applyChangeSet(repoRoot: string, changeSet: ChangeSetValue
   };
 
   for (const change of changeSet.changes) {
-    const resolved = join(repoRoot, change.repoRelativePath);
     const check = checkRepoRelativePath(repoRoot, change.repoRelativePath);
     if (!check.ok || !isAllowedWritePath(change.repoRelativePath)) {
       conflicts.push({ path: change.repoRelativePath, reason: check.reason ?? 'allowlist' });
       continue;
     }
+    // SEC-002: realpath/junction containment for the write target.
+    const safe = await resolveSafeWritePath(repoRoot, change.repoRelativePath);
+    if (!safe.ok) {
+      conflicts.push({ path: change.repoRelativePath, reason: `safe-path:${safe.code}` });
+      continue;
+    }
+    const resolved = safe.absolute;
     let oldContent: string | null = null;
     try {
       oldContent = await fs.readFile(resolved, 'utf8');
@@ -241,7 +247,18 @@ export async function applyChangeSet(repoRoot: string, changeSet: ChangeSetValue
         const reParsed = parseYaml(content);
         if (!reParsed || typeof reParsed !== 'object') throw new Error('re-parse failed');
       }
-      await fs.rename(tmp, resolved);
+      // SEC-002: recheck the parent containment immediately before rename
+      // (write-after-check race guard).
+      const recheck = await resolveSafeWritePath(repoRoot, change.repoRelativePath);
+      if (!recheck.ok) throw new Error(`safe-path recheck failed: ${recheck.code}`);
+      await fs.rename(tmp, recheck.absolute);
+      // Post-write verification: realpath still contained and hash matches.
+      const written = await fs.readFile(recheck.absolute, 'utf8');
+      const realCheck = await resolveSafeReadPath(repoRoot, change.repoRelativePath, { mode: 'file' });
+      if (!realCheck.ok) throw new Error(`post-write containment failed: ${realCheck.code}`);
+      if (createHash('sha256').update(written).digest('hex') !== change.newHash) {
+        throw new Error('post-write hash mismatch');
+      }
       applied.push(change.repoRelativePath);
     } catch (e) {
       await fs.rm(tmp, { force: true });
@@ -337,8 +354,16 @@ export class FileSystemCatalogStore implements CatalogStore {
   }
 
   async loadRaw(repoRelativePath: string): Promise<string | undefined> {
+    // SEC-001/002: catalog reads are restricted to catalog/ files that resolve
+    // (realpath) inside the repo root — traversal and junction escapes fail.
+    const safe = await resolveSafeReadPath(this.repoRoot, repoRelativePath, {
+      prefixes: ['catalog/'],
+      extensions: ['.yaml', '.yml', '.md'],
+      mode: 'file',
+    });
+    if (!safe.ok) return undefined;
     try {
-      return await fs.readFile(join(this.repoRoot, repoRelativePath), 'utf8');
+      return await fs.readFile(safe.absolute, 'utf8');
     } catch {
       return undefined;
     }
