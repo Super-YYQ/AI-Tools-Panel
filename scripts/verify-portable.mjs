@@ -54,10 +54,21 @@ if (links > 0) {
 // 3. Boot the extracted agent against a fresh temp Git repo and scan.
 const scanRepo = mkdtempSync(join(tmpdir(), 'aitp-portable-repo-'));
 writeFileSync(join(scanRepo, 'CLAUDE.md'), '# Portable smoke\n\nDeterministic guidance.\n', 'utf8');
+// Repo-level config keeps the scan provider-relevant even on a machine (or
+// CI runner) without any ~/.claude user configuration.
+mkdirSync(join(scanRepo, '.claude', 'skills', 'portable-smoke'), { recursive: true });
+writeFileSync(
+  join(scanRepo, '.claude', 'skills', 'portable-smoke', 'SKILL.md'),
+  '---\nname: portable-smoke\ndescription: Verify the portable package end to end.\n---\nScan body.\n',
+  'utf8',
+);
 execFileSync('git', ['init', '-q'], { cwd: scanRepo });
 
+// Isolated HOME so the smoke test exercises exactly what a fresh machine sees.
+const isolatedHome = mkdtempSync(join(tmpdir(), 'aitp-portable-home-'));
 const agent = spawn(process.execPath, [join(extracted, 'agent', 'dist', 'start.js')], {
   cwd: scanRepo,
+  env: { ...process.env, USERPROFILE: isolatedHome, HOME: isolatedHome },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 const startup = await new Promise((resolvePromise, reject) => {
@@ -109,4 +120,5 @@ agent.kill();
 const checksumNote = createHash('sha256').update(zip).digest('hex').slice(0, 12);
 rmSync(extractRoot, { recursive: true, force: true });
 rmSync(scanRepo, { recursive: true, force: true });
+rmSync(isolatedHome, { recursive: true, force: true });
 console.log(`verify-portable passed (${observations} observations from extracted archive ${checksumNote})`);
