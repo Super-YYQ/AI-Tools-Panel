@@ -646,7 +646,7 @@ export async function startServer(options: ServerOptions): Promise<StartedServer
       } catch {
         return;
       }
-      for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
         const childRel = rel ? `${rel}/${e.name}` : e.name;
         const full = join(d, e.name);
         if (e.isDirectory()) await walk(full, childRel, depth + 1);

@@ -15,7 +15,7 @@
     "build": "tsc -b . && npm run build --workspace @aitp/panel",
     "clean": "node scripts/clean.mjs",
     "lint": "eslint packages apps",
-    "typecheck": "tsc -b .",
+    "typecheck": "tsc -b . && tsc -p apps/panel/tsconfig.json",
     "test": "vitest run",
     "test:integration": "vitest run integration",
     "test:e2e": "playwright test",

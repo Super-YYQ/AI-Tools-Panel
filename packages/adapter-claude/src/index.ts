@@ -18,6 +18,7 @@ import type {
 import {
   buildObservation,
   canonicalJsonHash,
+  compareCodePoints,
   exists,
   parseFrontmatter,
   readScopedTextCapped,
@@ -202,7 +203,7 @@ async function findSkillDirs(root: string, context: ScanContext): Promise<Array<
   const out: Array<{ name: string; path: string }> = [];
   try {
     const entries = await import('node:fs').then((fs) => fs.promises.readdir(root, { withFileTypes: true }));
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    entries.sort((a, b) => compareCodePoints(a.name, b.name));
     for (const e of entries) {
       if (e.isDirectory() && (await exists(join(root, e.name, 'SKILL.md')))) {
         out.push({ name: e.name, path: join(root, e.name, 'SKILL.md') });
@@ -258,7 +259,7 @@ async function parseSkill(
     } catch {
       return;
     }
-    for (const e of dirents.sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const e of dirents.sort((a, b) => compareCodePoints(a.name, b.name))) {
       if (entries >= maxEntries) return;
       const rel = prefix ? prefix + '/' + e.name : e.name;
       if (/SKILL\.md$/.test(rel)) continue;

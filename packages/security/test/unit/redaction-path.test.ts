@@ -38,6 +38,52 @@ describe('redaction', () => {
     expect(value).toMatchObject({ command: expect.stringContaining('<redacted:'), safe: 'text' });
     expect(JSON.stringify(value)).not.toContain('abcdef1234567890abcdef');
   });
+
+  it('redacts field-name variants: plural, camelCase and compound secret names (SEC-201)', () => {
+    const { value, redactions } = redactObject({
+      commands: 'ls -la',
+      cmd: 'rm -rf /',
+      exec: 'whoami',
+      args: '--flag',
+      script: 'echo secret',
+      arguments: '--x',
+      clientSecret: 'cs_1234567890',
+      apiKey: 'key_abcdef1234567890',
+      privateKey: '-----BEGIN RSA PRIVATE KEY-----...',
+      headers: { authorization: 'Bearer deadbeef' },
+    });
+    const json = JSON.stringify(value);
+    expect(json).toContain('<redacted:commands>');
+    expect(json).toContain('<redacted:cmd>');
+    // compound camelCase secret names are masked on name alone; the exact marker
+    // casing is cosmetic, what matters is the value is gone.
+    expect(json).toContain('clientSecret":"<redacted:clientsecret>');
+    expect(json).toContain('apiKey":"<redacted:apikey>');
+    expect(json).toContain('privateKey":"<redacted:privatekey>');
+    expect(json).not.toContain('cs_1234567890');
+    expect(json).not.toContain('key_abcdef1234567890');
+    expect(json).not.toContain('deadbeef');
+    // every field-variant was masked on name alone
+    expect(redactions).toContain('commands');
+  });
+
+  it('does not over-redact benign field names like author/email (SEC-202)', () => {
+    const { value } = redactObject({ author: 'Jane Doe', homepage: 'https://example.com', license: 'MIT', maintainer: 'team' });
+    // The field NAME `author`/`email` must not force <redacted:author> — this is
+    // the H1 regression: legitimate package.json metadata stays intact.
+    const json = JSON.stringify(value);
+    expect(json).not.toContain('<redacted:author>');
+    expect(json).not.toContain('<redacted:homepage>');
+    expect(json).not.toContain('<redacted:license>');
+    expect(json).toContain('Jane Doe');
+  });
+
+  it('redacts short high-entropy tokens (32–39 chars) previously missed (SEC-202)', () => {
+    const token32 = 'Ab3Xy9Wq2Rf8Tk1Jn5Pz7Vd4Lg0Hn6Ms'.slice(0, 32); // 3 char classes
+    const { value } = redactText(`export KEY=${token32}`);
+    expect(value).toContain('<redacted:high-entropy>');
+    expect(value).not.toContain(token32);
+  });
 });
 
 describe('vendoring gate (CAT-005, gate 7)', () => {
@@ -62,8 +108,11 @@ describe('path tokens', () => {
     expect(normalizePathKey('C:\\Repo\\a')).toBe(normalizePathKey('c:/Repo/a'));
   });
 
-  it('repo files get repo-relative tokens, outside paths get ~ tokens', () => {
+  it('repo files get repo-relative tokens, outside paths get opaque tokens (SEC-203)', () => {
     expect(toPathToken('C:\\tmp\\repo\\catalog\\a.yaml', 'C:\\tmp\\repo')).toBe('catalog/a.yaml');
-    expect(toPathToken('C:\\Users\\yan\\.claude\\x', 'C:\\tmp\\repo')).toMatch(/^~\//);
+    expect(toPathToken('C:\\Users\\yan\\.claude\\x', 'C:\\tmp\\repo')).toBe('~/<outside-root>');
+    // never leak sensitive filenames like id_rsa or .env
+    expect(toPathToken('C:\\Users\\yan\\.ssh\\id_rsa', 'C:\\tmp\\repo')).toBe('~/<outside-root>');
+    expect(toPathToken('/home/yan/.env', '/tmp/repo')).toBe('~/<outside-root>');
   });
 });

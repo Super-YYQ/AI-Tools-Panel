@@ -25,7 +25,7 @@ M0..M6 ─► M7 Security, packaging, release candidate
 
 ### 任务
 
-- **M0-01** 创建 pnpm TypeScript workspace、根 scripts、格式化、lint、typecheck、Vitest 和 Playwright 基础配置。
+- **M0-01** 创建 TypeScript workspace（npm workspaces + `package-lock.json`，见 ADR-012）、根 scripts、格式化、lint、typecheck、Vitest 和 Playwright 基础配置。
 - **M0-02** 创建 `apps/local-agent`、`apps/panel` 和 `packages/*` 空壳，建立依赖边界检查。
 - **M0-03** 固定 active LTS Node 和 package manager 版本，提交 lockfile。
 - **M0-04** 建立 Artifact、Observation、Diagnostic、CatalogEntry、ChangeSet、AnalysisProposal 的 Zod schema 与 JSON Schema 生成。
@@ -193,3 +193,21 @@ M0..M6 ─► M7 Security, packaging, release candidate
 8. `feat(panel): browse inventory and artifact details`
 
 提交名称是建议，不授权自动 commit 或 push。
+
+## 12. 实施状态（2026-08-30 更新）
+
+| Milestone | 状态 | 证据 |
+| --- | --- | --- |
+| M0 Scaffold & contracts | ✅ 完成 | npm workspaces + lockfile、Zod schema、CI（`.github/workflows/ci.yml`）、ADR-011/012 |
+| M1 Catalog + ChangeSet | ✅ 完成 | `packages/catalog`（journal→tmp→rename 原子写、`sources.lock.yaml`、Rule Fragment round-trip） |
+| M2 Inventory core + adapters | ✅ 完成 | `packages/inventory-core`、`packages/adapter-claude`、`packages/adapter-codex` |
+| M3 Local API + scan orchestration | ✅ 完成 | `apps/local-agent`（SSE 进度、取消、SQLite store、SafePath 边界） |
+| M4 Web console | ✅ 完成（v0.1 范围） | `apps/panel`（浏览/过滤/详情/ChangeSet 预览应用）；虚拟化与高级 a11y 待增强 |
+| M5 Reconcile + rules workflows | ✅ 完成（v0.1 范围） | `packages/reconcile`、`/api/v1/rules*` 只读查看 |
+| M6 Optional AI enrichment | ⏸ 未开始（v1 为可选阶段，默认关闭） | `packages/enrichment` 仅骨架 |
+| M7 Hardening & RC | 🔶 进行中 | 2026-08-30 安全审计响应：v0.1.1 与 v0.1.1-rc 两轮修复；SBOM/license/secret/artifact 门已进 CI |
+
+已知差距（进入 v0.1.2）：
+
+- M4/M5 的测试强度需加强：virtualization、批量编辑、a11y 与 reconcile 存储结构测试。
+- `npm run verify` 覆盖 lint/typecheck/unit/schema/build；integration、security、e2e、audit 类门由 CI 单独执行（见 `.github/workflows/ci.yml`），本地等价命令为依次运行 `test:integration`、`test:security`、`docs:check`、`secret:scan`、`license:report`、`sbom:generate`、`artifact:audit`、`npm audit`。

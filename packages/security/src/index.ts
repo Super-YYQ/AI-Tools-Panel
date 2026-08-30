@@ -72,8 +72,9 @@ export function redactText(input: string, extraPatterns: Array<{ kind: string; r
       return `<redacted:${kind}>`;
     });
   }
-  // High-entropy strings that look like assigned secrets.
-  value = value.replace(/\b[A-Za-z0-9+/_-]{40,}={0,2}\b/g, (m) => {
+  // High-entropy strings that look like assigned secrets. A 32+ wide window
+  // catches short hex/base64 tokens (32–39 chars) that were previously skipped.
+  value = value.replace(/\b[A-Za-z0-9+/_-]{32,}={0,2}\b/g, (m) => {
     const classes = [/[a-z]/, /[A-Z]/, /[0-9]/, /[+/_-]/].filter((c) => c.test(m)).length;
     if (classes >= 3) {
       redactions.push('high-entropy');
@@ -89,7 +90,18 @@ export function redactField(value: string): string {
   return redactText(value).value;
 }
 
-const SENSITIVE_FIELD_NAMES = /^(api[_-]?key|token|secret|password|authorization|cookie|env|headers?|command|url)$/i;
+// Field names whose values are treated as secrets and masked on name alone.
+// Covers snake_case, kebab-case, camelCase and plural/compound variants
+// (SEC-201: clientSecret/apiKey/privateKey/commands/script/args must all match).
+const SENSITIVE_FIELD_NAMES =
+  /(api|access)?[_-]?(key|keys|token|tokens|secret|secrets|password|passwords|passwd|credential|credentials)|(authorization|auth)|(cookie|cookies)|(set[_-]?cookie)|(^|[_-])(command|commands|cmd|exec|args|arguments|argv|script|scripts)([_-]|$)|(^|.)(env|environ|environment)([_-]|$)|(private[_-]?key|public[_-]?key|client[_-]?secret|client[_-]?id|api[_-]?key|access[_-]?key)/i;
+
+// Field names that look sensitive but must never be redacted on name alone —
+// they hold benign values that would otherwise be destroyed (SEC-202: email in
+// package.json `author`, `pathToken` which keys read endpoints, `.env`
+// filenames, url-like identifiers, etc.).
+const BENIGN_FIELD_NAMES =
+  /^(author|authors|maintainer|maintainers|email|emails|url|urls|homepage|repository|name|title|displayName|description|version|license|keywords|pathToken|nextToken|pageToken|cursorToken|path|paths|location)$/i;
 
 /** Redact sensitive leaf values of a JSON-like object by field name and pattern. */
 export function redactObject<T>(input: T): { value: T; redactions: string[] } {
@@ -98,8 +110,9 @@ export function redactObject<T>(input: T): { value: T; redactions: string[] } {
     if (typeof v === 'string') {
       const r = redactText(v);
       all.push(...r.redactions);
-      if (key && SENSITIVE_FIELD_NAMES.test(key) && r.value === v && v.length > 0) {
-        const kind = SENSITIVE_FIELD_NAMES.test(key) ? key.toLowerCase().replace(/[^a-z]/g, '-') : 'field';
+      const isSensitiveName = key !== undefined && !BENIGN_FIELD_NAMES.test(key) && SENSITIVE_FIELD_NAMES.test(key);
+      if (isSensitiveName && v.length > 0) {
+        const kind = key.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'field';
         all.push(kind);
         return `<redacted:${kind}>`;
       }
@@ -121,7 +134,9 @@ export function redactObject<T>(input: T): { value: T; redactions: string[] } {
 export function toPathToken(absolutePath: string, root: string): string {
   const rel = relative(resolve(root), resolve(absolutePath));
   if (!rel.startsWith('..') && !isAbsolute(rel)) return rel.split(sep).join('/');
-  return `~/${absolutePath.split(/[\\/]/).pop() ?? 'unknown'}`;
+  // SEC-203: never expose the filename of an out-of-root path — names like
+  // `id_rsa` or `.env` would itself be a privacy leak. Emit a stable, opaque token.
+  return '~/<outside-root>';
 }
 
 export const VENDORED_EXCLUDE_PATTERNS = [
@@ -132,7 +147,7 @@ export const VENDORED_EXCLUDE_PATTERNS = [
   /(^|[\\/])dist([\\/]|$)/,
   /(^|[\\/])build([\\/]|$)/,
   /(^|[\\/])\.cache([\\/]|$)/,
-  /(^|\/)\.env/,
+  /(^|[\\/])\.env([\\/.]|$)/,
   /(^|[\\/])\.claude\.local\./,
   /session|transcript|\.log$/i,
 ];

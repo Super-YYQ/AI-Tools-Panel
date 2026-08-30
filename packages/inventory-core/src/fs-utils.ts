@@ -6,6 +6,7 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { ScanContext } from '@aitp/contracts';
+import { compareCodePoints } from './index.js';
 
 export interface FrontmatterResult {
   frontmatter: Record<string, unknown>;
@@ -56,7 +57,7 @@ export async function walkBounded(
       errors.push(`readdir failed: ${dir}: ${(e as Error).message}`);
       return;
     }
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    entries.sort((a, b) => compareCodePoints(a.name, b.name));
     for (const entry of entries) {
       if (files.length >= context.limits.maxFiles) return;
       const full = join(dir, entry.name);

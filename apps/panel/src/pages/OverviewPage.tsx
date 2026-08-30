@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import { type Health } from '../api';
 import { Loading, StatCard, useInventory } from './InstalledPage';
 
 export function OverviewPage({ health, inventoryKey, connection }: { health: Health | null; inventoryKey: number; connection: string }): React.JSX.Element {

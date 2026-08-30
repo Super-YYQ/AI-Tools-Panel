@@ -50,10 +50,13 @@ export function sanitizeObservation(observation: ObservationValue): ObservationV
   const allowed = SUMMARY_ALLOWLIST[observation.kind] ?? [];
   const cleaned = whitelist(observation.summary ?? {}, allowed);
   const { value } = redactObject(cleaned);
-  // Never persist machine-absolute-looking paths inside summaries.
+  // Never persist machine-absolute-looking paths inside summaries. Covers
+  // Windows drive paths (C:\ and C:/), UNC (\\server\) and POSIX roots (/home, /Users).
   for (const key of Object.keys(value)) {
     const v = value[key];
-    if (typeof v === 'string' && /^[a-zA-Z]:\\/.test(v)) value[key] = '<redacted:absolute-path>';
+    if (typeof v === 'string' && /^([a-zA-Z]:[\\/]|\\\\|\/(home|Users|root|var|etc|tmp|opt|usr|private)\/)/.test(v)) {
+      value[key] = '<redacted:absolute-path>';
+    }
   }
   // PRI-101: the whole Observation is the privacy boundary — names, evidence,
   // identity URLs and path tokens are sanitized too, not just summary.

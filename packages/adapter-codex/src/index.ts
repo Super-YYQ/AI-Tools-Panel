@@ -17,6 +17,7 @@ import type {
 import {
   buildObservation,
   canonicalJsonHash,
+  compareCodePoints,
   exists,
   parseFrontmatter,
   readScopedTextCapped,
@@ -301,7 +302,7 @@ async function findSkillDirs(root: string, context: ScanContext): Promise<Array<
   try {
     const fs = await import('node:fs');
     const entries = await fs.promises.readdir(root, { withFileTypes: true });
-    entries.sort((a, b) => a.name.localeCompare(b.name));
+    entries.sort((a, b) => compareCodePoints(a.name, b.name));
     for (const e of entries) {
       if (e.isDirectory() && (await exists(join(root, e.name, 'SKILL.md')))) {
         out.push({ name: e.name, path: join(root, e.name, 'SKILL.md') });
