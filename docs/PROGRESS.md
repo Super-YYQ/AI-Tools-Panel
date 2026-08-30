@@ -8,7 +8,7 @@
 
 | 复审项 | Implemented | CI verified | Release verified | 证据 |
 |---|---|---|---|---|
-| REL-101 E2E fixture 确定性 | done | done（本地 6/6；CI 待下次 push run） | — | E2E 每用例独立 panel+repo 实例；E2E-04 动态创建 gitignored `leaky/.env`；去 `describe.serial` |
+| REL-101 E2E fixture 确定性 | done | done（CI run 33306524950：e2e job 6/6） | — | E2E 每用例独立 panel+repo 实例；E2E-04 动态创建 gitignored `leaky/.env`；去 `describe.serial` |
 | SEC-101 scanner scoped realpath | done | done（部分场景本地无 symlink 特权会 skip，CI Windows runner 实际执行） | — | `readScopedTextCapped`（祖先 lstat 链 + 链接才 realpath + 目录判定缓存）；CLAUDE.md/Codex AGENTS/SKILL/config/manifest 全部走 scoped 读；测试：越界 symlink → `SYMLINK_OUTSIDE_ROOT` 诊断且内容不进入 inventory |
 | SEC-102 rollback SafePath | done | done | — | rollback 逐条 `resolveSafeWritePath` + 恢复后 containment 校验；不安全条目 → `manualRecoveryRequired` + journal 保留 |
 | PRI-101 全 Observation 清洗 | done | done | — | `canonicalizeSourceUrl`（去 userinfo/query/fragment、规范化 .git）；canonicalName/displayName/sourceEvidence/pathToken 一并脱敏；测试断言 `secretpw`/email/用户名不入持久化 |
@@ -28,6 +28,7 @@
 
 ```powershell
 npm run verify        # lint + 真实 typecheck + 154 通过/1 平台跳过 + schema:check + build
+（CI run 33306524950 于 Windows runner 全绿：windows + e2e 双 job，含 verify:portable 解压冒烟）
 npm run test:e2e      # Playwright：6/6（独立实例）
 npm run test:performance  # 增量扫描 2000 = 2.5s（<5s，冷扫 6.3s 记录在案）
 npm run secret:scan / license:report / sbom:generate / artifact:audit
