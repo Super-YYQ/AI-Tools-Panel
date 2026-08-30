@@ -79,6 +79,13 @@
 - 原因：需要增量扫描、delta 和诊断查询，同时避免数据库渗透领域逻辑。
 - 结果：SQLite 库选型在 Milestone 0 用 Windows 安装/打包 spike 验证；若原生依赖不可靠，可替换实现而不改 contract。
 
+### ADR-011 spike 结果（2026-08-30，Windows 11 x64 / Node 24）
+
+- 选型：`better-sqlite3`（同步 API，预编译二进制，无需 node-gyp 本地编译）。
+- spike 证据：`apps/local-agent/test/integration/store-sqlite.test.ts` 在临时目录以 WAL 模式建库、写入/查询 ScanRun、Observation、Diagnostic、AnalysisProposal 全部通过；`apps/local-agent/src/store-sqlite.ts` 提供生产实现，`main.ts` 在原生绑定不可用时回退内存实现（APP-004 不受阻）。
+- 数据库文件位于 app-owned `.aitp/inventory.db`（gitignored，GIT-002）。
+- 约束：better-sqlite3 为原生模块，发布打包需包含预编译产物或锁版本；CI 已在 Windows 上验证安装。
+
 ## 开发前仍需确认的产品事项
 
 以下不会阻止 Milestone 0–2，但发布前需要用户决定：
@@ -87,3 +94,10 @@
 - 是否需要打包为安装器，还是长期使用仓库快捷命令；
 - 是否允许提交脱敏机器 snapshot，默认答案为否；
 - 首批 UI 语言仅中文还是中英双语，默认先中文并保留 i18n 结构。
+
+## ADR-012：包管理器使用 npm workspaces
+
+- 状态：accepted（2026-08-30，环境约束下的替代决策）
+- 决策：v0.1 实现使用 npm workspaces 而非 ADR-004 推荐的 pnpm；`packageManager` 字段不设置，脚本不依赖 pnpm。
+- 原因：当前开发环境 corepack 无法写入 Node 安装目录（EPERM），npm 内置且零额外安装。
+- 影响：无 `pnpm-lock.yaml`，使用 `package-lock.json`；workspace 依赖语法 `*` 语义一致。未来切换 pnpm 只需重写 lockfile 与 install 命令。

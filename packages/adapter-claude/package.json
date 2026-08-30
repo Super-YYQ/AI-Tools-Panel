@@ -1,0 +1,16 @@
+{
+  "name": "@aitp/adapter-claude",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@aitp/contracts": "*",
+    "@aitp/inventory-core": "*",
+    "@aitp/security": "*"
+  }
+}

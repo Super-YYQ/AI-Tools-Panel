@@ -1,0 +1,20 @@
+{
+  "name": "@aitp/catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@aitp/contracts": "*",
+    "@aitp/security": "*",
+    "diff": "^7.0.0",
+    "yaml": "^2.6.1"
+  },
+  "devDependencies": {
+    "@types/diff": "^7.0.0"
+  }
+}

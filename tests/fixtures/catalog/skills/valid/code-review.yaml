@@ -1,0 +1,22 @@
+apiVersion: aitp.dev/v1alpha1
+kind: Skill
+metadata:
+  id: code-review
+  displayName: Code Review
+  shortDescription: Review code against repository rules.
+  tags:
+    - quality
+    - review
+spec:
+  targets:
+    - claude-code
+  ownership: referenced
+  source:
+    type: git
+    url: https://github.com/example/skills
+    revision: 0123456789abcdef
+  contentPolicy: metadata-only
+overlay:
+  notes: ''
+  fieldOrigins:
+    shortDescription: human

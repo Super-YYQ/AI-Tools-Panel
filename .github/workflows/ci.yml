@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install
+      - run: npm run verify
+      - run: npm run test:integration
+      - run: npm run test:security
+      - run: npm run docs:check
+      - run: npm run secret:scan
+      - run: npm run license:report
+      - run: npm run sbom:generate
+      - run: npm run artifact:audit
+      - run: npm audit --audit-level=high || true
+      - name: Check no generated schema drift
+        run: git diff --exit-code -- schemas

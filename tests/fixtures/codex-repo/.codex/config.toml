@@ -1,0 +1,7 @@
+# Codex project config
+[profile.default]
+approval_policy = "on-request"
+
+[hooks]
+trusted = false
+api_token = "ghp_exampletokenvalue0000000000"

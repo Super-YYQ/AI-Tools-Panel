@@ -1,0 +1,4 @@
+apiVersion: aitp.dev/v1alpha1
+kind: Skill
+metadata:
+  displayName: Broken

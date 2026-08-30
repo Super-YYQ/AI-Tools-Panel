@@ -1,0 +1,8 @@
+{
+  "name": "example-marketplace",
+  "owner": { "name": "Example Org" },
+  "plugins": [
+    { "name": "repo-plugin", "source": "./myplugin" },
+    { "name": "declared-not-installed", "source": "https://github.com/example/not-installed" }
+  ]
+}

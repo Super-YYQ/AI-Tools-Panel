@@ -1,0 +1,50 @@
+{
+  "name": "ai-tools-panel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-first, Git-first inventory panel for Claude Code and Codex configuration assets.",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -b . && npm run build --workspace @aitp/panel",
+    "clean": "node scripts/clean.mjs",
+    "lint": "eslint packages apps",
+    "typecheck": "tsc -b . --dry || tsc -b .",
+    "test": "vitest run",
+    "test:integration": "vitest run integration",
+    "test:e2e": "playwright test",
+    "test:security": "vitest run security",
+    "test:performance": "vitest run performance",
+    "schema:check": "node scripts/schema-check.mjs",
+    "secret:scan": "node scripts/secret-scan.mjs",
+    "license:report": "node scripts/license-report.mjs",
+    "artifact:audit": "node scripts/artifact-audit.mjs",
+    "sbom:generate": "node scripts/sbom.mjs",
+    "docs:check": "node scripts/docs-check.mjs",
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run schema:check && npm run build",
+    "dev:agent": "node --import tsx apps/local-agent/src/main.ts",
+    "dev:panel": "npm run dev --workspace @aitp/panel",
+    "start": "node scripts/start-panel.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "better-sqlite3": "^13.0.3",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "@fastify/static": "^10.1.3"
+  }
+}

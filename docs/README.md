@@ -14,6 +14,7 @@
 | 增加 AI 校准 | [AI_ENRICHMENT_SPEC.md](AI_ENRICHMENT_SPEC.md) | 关闭 AI 仍可用；输出可验证且有证据 |
 | 涉及凭据、路径、Hook、文件写入或 Git | [SECURITY_AND_GIT.md](SECURITY_AND_GIT.md) | 威胁检查和敏感数据测试通过 |
 | 领取下一阶段工作 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | 对应 milestone 的退出条件全部满足 |
+| 查看当前实现进度与限制 | [PROGRESS.md](PROGRESS.md) | 与 `npm run verify` 结果一致 |
 | 编写或审查测试 | [TEST_STRATEGY.md](TEST_STRATEGY.md) | 相关测试层级与总体验收通过 |
 
 ## 权威顺序

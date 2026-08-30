@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+.aitp/
+*.log
+.vite/
+playwright-report/
+test-results/
+.env
+.env.*
+sbom.cyclonedx.json

@@ -34,7 +34,34 @@ AI 不是扫描器，也不是必需依赖。关闭 AI 后，扫描、查阅、�
 
 ## 项目状态
 
-仓库当前处于 documentation-first 阶段，尚未生成应用代码。其他开发工具应先阅读 [开发文档索引](docs/README.md)，再按 [实施计划](docs/IMPLEMENTATION_PLAN.md) 从 Milestone 0 开始。
+v0.1 已实现 M0–M6 核心功能：workspace scaffold、contracts、catalog/ChangeSet、inventory core、Claude/Codex adapters、Local API、Web 控制台、reconcile 与可选 enrichment。进度与已知限制见 [进度记录](docs/PROGRESS.md)。
+
+## 快速开始（Windows）
+
+要求：Node.js 22+（含 npm）、Git。
+
+```powershell
+git clone <repo-url>
+cd AI-Tools-Panel
+powershell -ExecutionPolicy Bypass -File scripts/panel.ps1
+```
+
+首次运行会自动 `npm install`、构建并启动本机服务，然后打开浏览器。服务只绑定 loopback 地址；端口冲突时使用可用端口并在控制台显示。也可以手动执行：
+
+```powershell
+npm install
+npm run build
+npm start
+```
+
+开发与验证命令：
+
+```powershell
+npm run verify          # lint + typecheck + tests + schema:check + build
+npm run test:integration
+npm run test:security
+npm run docs:check
+```
 
 完整现有产品调研见 [调研报告](docs/research/agent-config-control-plane-landscape-2026-08-29.md)。
 

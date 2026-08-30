@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/contracts" },
+    { "path": "../../packages/security" },
+    { "path": "../../packages/inventory-core" },
+    { "path": "../../packages/catalog" },
+    { "path": "../../packages/reconcile" },
+    { "path": "../../packages/adapter-claude" },
+    { "path": "../../packages/adapter-codex" },
+    { "path": "../../packages/enrichment" }
+  ]
+}
