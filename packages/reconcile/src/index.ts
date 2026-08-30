@@ -54,7 +54,11 @@ function slug(s: string): string {
 function identityMatches(entrySource: CatalogEntryValue['spec']['source'], obsIdentity: SourceIdentityValue): boolean {
   if (entrySource.type === 'git' && obsIdentity.type === 'git') {
     if (normalizeGitUrl(entrySource.url) !== normalizeGitUrl(obsIdentity.canonicalUrl ?? '')) return false;
-    if (entrySource.revision && obsIdentity.revision && entrySource.revision !== obsIdentity.revision) return false;
+    // FUN-103: a pinned revision must be confirmed by observation evidence —
+    // URL match alone is not a match when the catalog pins a revision.
+    if (entrySource.revision) {
+      return obsIdentity.revision === entrySource.revision;
+    }
     return true;
   }
   if (entrySource.type === 'marketplace' && obsIdentity.type === 'marketplace') {
@@ -86,7 +90,9 @@ function detectDrift(entry: CatalogEntryValue, o: ObservationValue): string[] {
   const drift: string[] = [];
   const src = entry.spec.source;
   if (src.type === 'git' && src.revision && o.sourceIdentity?.type === 'git') {
-    if (o.sourceIdentity.revision && o.sourceIdentity.revision !== src.revision) {
+    if (!o.sourceIdentity.revision) {
+      drift.push(`locked revision ${src.revision} is unverified by scan evidence`);
+    } else if (o.sourceIdentity.revision !== src.revision) {
       drift.push(`observation revision ${o.sourceIdentity.revision} differs from locked revision ${src.revision}`);
     }
   }

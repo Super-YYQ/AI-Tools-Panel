@@ -43,3 +43,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install chromium
       - run: npm run test:e2e
+      # REL-102: extract the portable archive in a clean directory, assert no
+      # workspace links survived, boot the agent and scan a fixture repo.
+      - run: npm run package:portable
+      - run: npm run verify:portable

@@ -52,7 +52,25 @@ for (const scope of readdirSync(join(repoRoot, 'node_modules')).filter((n) => n.
   rmSync(join(prodNodeModules, scope), { recursive: true, force: true });
   cpSync(join(repoRoot, 'node_modules', scope), join(prodNodeModules, scope), { recursive: true });
 }
-console.log(`package:portable: copied ${copied}+ top-level dependency folders`);
+// REL-102: @aitp/* workspace entries are npm links/junctions into packages/* —
+// they would break after extraction. Replace them with real copies of the
+// compiled package (package.json + dist).
+const aitpScope = join(prodNodeModules, '@aitp');
+rmSync(aitpScope, { recursive: true, force: true });
+mkdirSync(aitpScope, { recursive: true });
+for (const manifestPath of ['packages/contracts', 'packages/security', 'packages/inventory-core', 'packages/catalog', 'packages/reconcile', 'packages/adapter-claude', 'packages/adapter-codex', 'packages/enrichment']) {
+  const name = manifestPath.split('/').pop();
+  const pkgDir = join(repoRoot, manifestPath);
+  if (!existsSync(join(pkgDir, 'dist'))) {
+    console.error(`package:portable: missing dist for ${manifestPath}; run npm run build first`);
+    process.exit(1);
+  }
+  const dest = join(aitpScope, name);
+  mkdirSync(dest, { recursive: true });
+  cpSync(join(pkgDir, 'package.json'), join(dest, 'package.json'));
+  cpSync(join(pkgDir, 'dist'), join(dest, 'dist'), { recursive: true });
+}
+console.log(`package:portable: copied ${copied}+ top-level dependency folders; @aitp/* materialized`);
 
 // Launcher (no npm install at first run; Node is the only prerequisite).
 writeFileSync(

@@ -114,8 +114,15 @@ const DraftsBody = z
   })
   .refine((v) => v.entries.length + v.fragments.length > 0, { message: 'at least one entry or fragment required' });
 
+const ALLOWED_BIND_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
+
 export async function startServer(options: ServerOptions): Promise<StartedServer> {
   const repoRoot = resolve(options.repoRoot);
+  // SEC-103: loopback binding is a hard invariant, not a default — a LAN or
+  // wildcard host must fail startup instead of being silently overridden.
+  if (options.host !== undefined && !ALLOWED_BIND_HOSTS.has(options.host)) {
+    throw new Error(`BIND_HOST_REJECTED: refusing to bind ${options.host}; only 127.0.0.1, ::1 and localhost are allowed`);
+  }
   const store: InventoryStore = options.store ?? (await openDefaultStore(repoRoot));
   const catalogStore = new FileSystemCatalogStore(repoRoot);
   const sessionToken = randomBytes(24).toString('hex');
@@ -185,9 +192,15 @@ export async function startServer(options: ServerOptions): Promise<StartedServer
   server.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     const url = request.url;
 
-    // Strict loopback Host (DNS rebinding): accept only loopback hostnames.
+    // Strict loopback Host (DNS rebinding): parse with URL so bracketed IPv6
+    // hosts like [::1]:12345 resolve to the bare hostname (SEC-104).
     const hostHeader = (request.headers.host ?? '').toLowerCase();
-    const hostname = hostHeader.split(':')[0] ?? '';
+    let hostname = '';
+    try {
+      hostname = new URL(`http://${hostHeader}`).hostname;
+    } catch {
+      hostname = hostHeader;
+    }
     if (!['127.0.0.1', '::1', '[::1]', 'localhost'].includes(hostname)) {
       await reply.code(403).send(envelope('HOST_REJECTED', 'host header is not loopback', request));
       return reply;
@@ -313,7 +326,11 @@ export async function startServer(options: ServerOptions): Promise<StartedServer
         const result = await orchestrator.execute(previousObservations, (event) => publish(scanId, 'progress', event));
         if (!serverClosed) {
           await store.saveScanRun(result.run, result.observations, result.diagnostics);
-          lastRunId = result.run.runId;
+          // FUN-101: cancelled/failed runs are stored for history but never
+          // replace the delta baseline (SCANNING_SPEC §3 Persist and Delta).
+          if (result.run.status === 'completed' || result.run.status === 'partial') {
+            lastRunId = result.run.runId;
+          }
           scanIdToRunId.set(scanId, result.run.runId);
         }
         publish(scanId, 'done', {

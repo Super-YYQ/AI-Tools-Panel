@@ -18,13 +18,15 @@ import type {
 import {
   buildObservation,
   canonicalJsonHash,
-  classifyReadFailure,
   exists,
   parseFrontmatter,
-  readTextCapped,
+  readScopedTextCapped,
+  scopedReadDiagnosticCode,
   sha256Hex,
   walkBounded,
+  ParseResultCache,
 } from '@aitp/inventory-core';
+import { relative, resolve as resolvePath } from 'node:path';
 import { redactObject } from '@aitp/security';
 
 export const CLAUDE_ADAPTER_VERSION = '1.1.0';
@@ -36,20 +38,27 @@ function identityFromSourceField(source: unknown): SourceIdentityValue | undefin
   return undefined;
 }
 
-function readFailureDiagnostic(
-  provider: 'claude-code',
-  target: string,
-  kind: 'access-denied' | 'too-large' | 'missing',
-  message: string,
-): { code: 'ACCESS_DENIED' | 'FILE_TOO_LARGE' | 'ROOT_NOT_FOUND'; severity: 'warning' | 'info'; provider: string; target: string; message: string; recovery: string } {
-  if (kind === 'access-denied') {
-    return { code: 'ACCESS_DENIED', severity: 'warning', provider, target, message, recovery: 'Grant read permission or exclude this root from scanning.' };
+/** SEC-101: scope root for a candidate — repo files bound to repoRoot, user files to homeDir. */
+function scopeRootFor(candidate: Candidate, context: ScanContext): { root: string; relPath: string } {
+  const norm = candidate.absolutePath.split('\\').join('/');
+  const repoNorm = context.repoRoot.split('\\').join('/');
+  if (norm.toLowerCase().startsWith(repoNorm.toLowerCase())) {
+    return { root: context.repoRoot, relPath: relative(context.repoRoot, candidate.absolutePath) };
   }
-  if (kind === 'too-large') {
-    return { code: 'FILE_TOO_LARGE', severity: 'warning', provider, target, message, recovery: 'Increase the configured size limit if this file must be scanned.' };
-  }
-  return { code: 'ROOT_NOT_FOUND', severity: 'info', provider, target, message, recovery: 'Verify the file exists at scan time.' };
+  return { root: context.homeDir, relPath: relative(context.homeDir, candidate.absolutePath) };
 }
+
+async function scopedRead(
+  candidate: Candidate,
+  context: ScanContext,
+): Promise<{ ok: true; text: string } | { ok: false; code: 'SYMLINK_OUTSIDE_ROOT' | 'FILE_TOO_LARGE' | 'ACCESS_DENIED' | 'ROOT_NOT_FOUND' }> {
+  const { root, relPath } = scopeRootFor(candidate, context);
+  void resolvePath;
+  const result = await readScopedTextCapped({ root, path: relPath });
+  if (result.ok) return { ok: true, text: result.content };
+  return { ok: false, code: scopedReadDiagnosticCode(result.code) };
+}
+
 
 
 export class ClaudeAdapter implements ProviderAdapter {
@@ -133,7 +142,39 @@ export class ClaudeAdapter implements ProviderAdapter {
     }
   }
 
+  private readonly parseCache = new ParseResultCache();
+
+  /** SCANNING_SPEC §11: repeat scans reuse parse output keyed by path+size+mtime. */
   async parse(candidate: Candidate, context: ScanContext): Promise<ParseResult> {
+    const { stat } = await import('node:fs/promises');
+    let size = 0;
+    let mtimeMs = 0;
+    try {
+      const st = await stat(candidate.absolutePath);
+      size = st.size;
+      mtimeMs = st.mtimeMs;
+    } catch {
+      return { observations: [], diagnostics: [] };
+    }
+    const cached = this.parseCache.get(candidate.absolutePath, size, mtimeMs, this.version);
+    if (cached) {
+      return {
+        observations: cached.observations as ParseResult['observations'],
+        diagnostics: cached.diagnostics as ParseResult['diagnostics'],
+      };
+    }
+    const result = await this.parseUncached(candidate, context);
+    this.parseCache.set(candidate.absolutePath, {
+      size,
+      mtimeMs,
+      parserVersion: this.version,
+      observations: result.observations,
+      diagnostics: result.diagnostics,
+    });
+    return result;
+  }
+
+  private async parseUncached(candidate: Candidate, context: ScanContext): Promise<ParseResult> {
     const diagnostics: DiagnosticValue[] = [];
     const discoveredAt = new Date().toISOString();
     const pathToken = candidate.absolutePath.startsWith(context.repoRoot)
@@ -150,9 +191,9 @@ export class ClaudeAdapter implements ProviderAdapter {
       return parseHooks(candidate, pathToken, context, diagnostics, discoveredAt);
     }
     if (candidate.kind === 'plugin') {
-      return parseManifest(candidate, pathToken, diagnostics, discoveredAt, 'plugin');
+      return parseManifest(candidate, pathToken, context, diagnostics, discoveredAt, 'plugin');
     }
-    return parseManifest(candidate, pathToken, diagnostics, discoveredAt, 'marketplace');
+    return parseManifest(candidate, pathToken, context, diagnostics, discoveredAt, 'marketplace');
   }
 }
 
@@ -177,15 +218,16 @@ async function findSkillDirs(root: string, context: ScanContext): Promise<Array<
 async function parseSkill(
   candidate: Candidate,
   pathToken: string,
-  _context: ScanContext,
+  context: ScanContext,
   diagnostics: DiagnosticValue[],
   discoveredAt: string,
 ): Promise<ParseResult> {
-  const text = await readTextCapped(candidate.absolutePath);
-  if (text === undefined) {
-    diagnostics.push(readFailureDiagnostic('claude-code', pathToken, await classifyReadFailure(candidate.absolutePath), 'skill file unreadable'));
+  const scoped = await scopedRead(candidate, context);
+  if (!scoped.ok) {
+    diagnostics.push({ code: scoped.code, severity: scoped.code === 'SYMLINK_OUTSIDE_ROOT' ? 'warning' : scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'claude-code', target: pathToken, message: `skill file unreadable (${scoped.code})`, recovery: scoped.code === 'SYMLINK_OUTSIDE_ROOT' ? 'The link target is outside the scanned scope; only the link is recorded.' : undefined });
     return { observations: [], diagnostics };
   }
+  const text = scoped.text;
   const fm = parseFrontmatter(text);
   if (fm.error) {
     diagnostics.push({ code: 'INVALID_FRONTMATTER', severity: 'warning', provider: 'claude-code', target: pathToken, message: fm.error, recovery: 'Fix YAML frontmatter delimiters.' });
@@ -250,11 +292,12 @@ async function parseRuleDocument(
   diagnostics: DiagnosticValue[],
   discoveredAt: string,
 ): Promise<ParseResult> {
-  const text = await readTextCapped(candidate.absolutePath);
-  if (text === undefined) {
-    diagnostics.push(readFailureDiagnostic('claude-code', pathToken, await classifyReadFailure(candidate.absolutePath), 'rule document unreadable'));
+  const scoped = await scopedRead(candidate, context);
+  if (!scoped.ok) {
+    diagnostics.push({ code: scoped.code, severity: scoped.code === 'SYMLINK_OUTSIDE_ROOT' ? 'warning' : scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'claude-code', target: pathToken, message: `rule document unreadable (${scoped.code})` });
     return { observations: [], diagnostics };
   }
+  const text = scoped.text;
   const fm = parseFrontmatter(text);
   const imports = [...text.matchAll(/@([^\s]+)/g)].map((m) => m[1]!);
   const summary: Record<string, unknown> = {
@@ -281,15 +324,16 @@ async function parseRuleDocument(
 async function parseHooks(
   candidate: Candidate,
   pathToken: string,
-  _context: ScanContext,
+  context: ScanContext,
   diagnostics: DiagnosticValue[],
   discoveredAt: string,
 ): Promise<ParseResult> {
-  const text = await readTextCapped(candidate.absolutePath);
-  if (text === undefined) {
-    diagnostics.push(readFailureDiagnostic('claude-code', pathToken, await classifyReadFailure(candidate.absolutePath), 'settings file unreadable'));
+  const scoped = await scopedRead(candidate, context);
+  if (!scoped.ok) {
+    diagnostics.push({ code: scoped.code, severity: scoped.code === 'SYMLINK_OUTSIDE_ROOT' ? 'warning' : scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'claude-code', target: pathToken, message: `settings file unreadable (${scoped.code})` });
     return { observations: [], diagnostics };
   }
+  const text = scoped.text;
   let settings: Record<string, unknown>;
   try {
     settings = parseYaml(text) as Record<string, unknown>;
@@ -320,15 +364,17 @@ async function parseHooks(
 async function parseManifest(
   candidate: Candidate,
   pathToken: string,
+  context: ScanContext,
   diagnostics: DiagnosticValue[],
   discoveredAt: string,
   kind: 'plugin' | 'marketplace',
 ): Promise<ParseResult> {
-  const text = await readTextCapped(candidate.absolutePath);
-  if (text === undefined) {
-    diagnostics.push(readFailureDiagnostic('claude-code', pathToken, await classifyReadFailure(candidate.absolutePath), 'manifest unreadable'));
+  const scoped = await scopedRead(candidate, context);
+  if (!scoped.ok) {
+    diagnostics.push({ code: scoped.code, severity: scoped.code === 'SYMLINK_OUTSIDE_ROOT' ? 'warning' : scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'claude-code', target: pathToken, message: `manifest unreadable (${scoped.code})` });
     return { observations: [], diagnostics };
   }
+  const text = scoped.text;
   let manifest: Record<string, unknown>;
   try {
     manifest = parseYaml(text) as Record<string, unknown>;

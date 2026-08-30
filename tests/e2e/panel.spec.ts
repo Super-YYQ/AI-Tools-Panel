@@ -9,11 +9,13 @@ const execAsync = promisify(execFile);
 
 let panel: PanelInstance;
 
-test.beforeAll(async () => {
+// REL-101: every scenario runs against its own panel instance and temp repo,
+// so one failure can never shadow the remaining E2E coverage.
+test.beforeEach(async () => {
   panel = await startPanel();
 });
 
-test.afterAll(async () => {
+test.afterEach(async () => {
   await panel.stop();
 });
 
@@ -46,7 +48,7 @@ async function gitStatus(): Promise<string> {
   return stdout.trim();
 }
 
-test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
+test.describe('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
   test('E2E-01 首次扫描：六类发现、证据可追溯、仓库不变、首屏稳定', async ({ browser }) => {
     const page = await openPanel(browser);
     await scan(page);
@@ -61,6 +63,7 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
 
   test('E2E-02 编辑人工简述：完整 diff 审查、原文件不变、重扫保留 Overlay', async ({ browser }) => {
     const page = await openPanel(browser);
+    await scan(page);
     await page.getByRole('navigation').getByRole('button', { name: '已安装' }).click();
     const card = page.getByRole('article', { name: /deploy-helper \(skill\)/ });
     await card.getByRole('button', { name: '纳入目录' }).click();
@@ -111,7 +114,16 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
   });
 
   test('E2E-04 本地 Skill import preview：默认 metadata-only、敏感文件被阻止', async ({ browser }) => {
+    // REL-101: the leaky fixture's .env is gitignored by design — create it
+    // per-instance so a clean clone reproduces the exclusion scenario.
+    await panel.stop();
+    panel = await startPanel(async (repo) => {
+      const { writeFile: wf, mkdir: mkd } = await import('node:fs/promises');
+      await mkd(join(repo, '.claude', 'skills', 'leaky'), { recursive: true });
+      await wf(join(repo, '.claude', 'skills', 'leaky', '.env'), 'FAKE_MARKER_TOKEN=aitp-e2e-not-a-secret\n', 'utf8');
+    });
     const page = await openPanel(browser);
+    await scan(page);
     await page.getByRole('navigation').getByRole('button', { name: '已安装' }).click();
     const card = page.getByRole('article', { name: /leaky \(skill\)/ });
     await card.getByRole('button', { name: '本地导入预览' }).click();
@@ -128,6 +140,7 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
 
   test('E2E-05 规则片段：行选择、frontmatter 证据、原规则文件不变', async ({ browser }) => {
     const page = await openPanel(browser);
+    await scan(page);
     await page.getByRole('navigation').getByRole('button', { name: '规则' }).click();
     const item = page.locator('li', { hasText: 'AGENTS.md' }).first();
     await item.getByRole('button', { name: '保存片段' }).click();
@@ -156,6 +169,7 @@ test.describe.serial('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
     await page.getByRole('navigation').getByRole('button', { name: '设置' }).click();
     await expect(page.getByText(/保留的扫描运行数/)).toBeVisible();
     // Core manual flow still works end to end.
+    await scan(page);
     await page.getByRole('navigation').getByRole('button', { name: '已安装' }).click();
     const card = page.getByRole('article', { name: /notes \(skill\)/ });
     await card.getByRole('button', { name: '纳入目录' }).click();

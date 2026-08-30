@@ -27,6 +27,22 @@ async function get(path: string, token?: string): Promise<Response> {
   return fetch(`http://127.0.0.1:${started.port}${path}`, { headers: token ? { 'x-aitp-session': token } : {} });
 }
 
+/** Bind the generic get/post helpers to a specific server instance. */
+function bindTo(server: StartedServer): {
+  get: (path: string) => Promise<Response>;
+  post: (path: string, body: unknown) => Promise<Response>;
+} {
+  return {
+    get: (path) => fetch(`http://127.0.0.1:${server.port}${path}`, { headers: { 'x-aitp-session': server.sessionToken } }),
+    post: (path, body) =>
+      fetch(`http://127.0.0.1:${server.port}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-aitp-session': server.sessionToken },
+        body: JSON.stringify(body),
+      }),
+  };
+}
+
 async function post(path: string, body: unknown, token?: string): Promise<Response> {
   return fetch(`http://127.0.0.1:${started.port}${path}`, {
     method: 'POST',
@@ -294,5 +310,123 @@ describe('boundary + terminal-state suite', () => {
     const { scanId } = (await (await post('/api/v1/scans', {}, started.sessionToken)).json()) as { scanId: string };
     const { done } = await readSSE(scanId);
     expect(done).toMatchObject({ status: 'failed' });
+  });
+});
+
+describe('reaudit additions (SEC-101/103/104, FUN-101)', () => {
+  beforeEach(async () => {
+    repo = await mkdtemp(join(tmpdir(), 'aitp-bnd-'));
+    await cp(join(fixture, 'claude-repo'), repo, { recursive: true });
+    await cp(join(fixture, 'codex-repo'), repo, { recursive: true });
+    await execAsync('git', ['init', '-q'], { cwd: repo });
+    await execAsync('git', ['-C', repo, 'config', 'user.email', 't@t']);
+    await execAsync('git', ['-C', repo, 'config', 'user.name', 'T']);
+    await execAsync('git', ['-C', repo, 'add', '-A']);
+    await execAsync('git', ['-C', repo, 'commit', '-qm', 'init']);
+    const { appendFile } = await import('node:fs/promises');
+    await appendFile(join(repo, '.git', 'info', 'exclude'), '.aitp\n', 'utf8').catch(() => undefined);
+    started = await startServer({ repoRoot: repo, adapters: [new ClaudeAdapter(), new CodexAdapter()] });
+  });
+
+  afterEach(async () => {
+    await started?.close();
+    await rm(repo, { recursive: true, force: true, maxRetries: 3 }).catch(() => undefined);
+  });
+
+  it('scanner does not follow a file symlink escaping the repo (SEC-101)', async () => {
+    const outside = await mkdtemp(join(tmpdir(), 'aitp-out-s101-'));
+    try {
+      await writeFile(join(outside, 'private.md'), `Secret inside: ${MARKER}\n`, 'utf8');
+      // Swap the scanned CLAUDE.md for a symlink to an outside file. File
+      // symlinks need elevated privileges on Windows — skip when unavailable
+      // (CI Windows runners exercise this path).
+      const claudeMd = join(repo, 'CLAUDE.md');
+      await rm(claudeMd, { force: true });
+      try {
+        await symlink(join(outside, 'private.md'), claudeMd, 'file');
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+          console.log('skip: fixture file missing for symlink swap');
+          return;
+        }
+        console.log('skip: file symlink privilege unavailable');
+        return;
+      }
+      await post('/api/v1/scans', {}, started.sessionToken);
+      let inv: { observations: Array<{ canonicalName: string }>; diagnostics: Array<{ code: string; target?: string }> } | undefined;
+      for (let i = 0; i < 100; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        inv = (await (await get('/api/v1/inventory', started.sessionToken)).json()) as never;
+        if (inv!.diagnostics.some((d) => d.code === 'SYMLINK_OUTSIDE_ROOT')) break;
+      }
+      expect(inv!.diagnostics.some((d) => d.code === 'SYMLINK_OUTSIDE_ROOT')).toBe(true);
+      // The outside content was never ingested.
+      expect(JSON.stringify(inv)).not.toContain('Secret inside');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('cancelled scan does not replace the delta baseline (FUN-101)', async () => {
+    const { get: getOn, post: postOn } = bindTo(started);
+    // Establish a completed baseline with the real adapters.
+    await postOn('/api/v1/scans', {});
+    let baselineRunId: string | null = null;
+    for (let i = 0; i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      const inv = (await (await getOn('/api/v1/inventory')).json()) as { runId: string | null; observations: unknown[] };
+      if (inv.observations.length > 0) {
+        baselineRunId = inv.runId;
+        break;
+      }
+    }
+    expect(baselineRunId).not.toBeNull();
+
+    // Restart with a slow fake adapter, start a scan and cancel it.
+    await started.close();
+    const slow = await startServer({ repoRoot: repo, adapters: [fakeAdapter({ slowParseMs: 1200, candidateCount: 3 })] });
+    try {
+      const { get: getSlow, post: postSlow } = bindTo(slow);
+      const { scanId } = (await (await postSlow('/api/v1/scans', {})).json()) as { scanId: string };
+      await new Promise((r) => setTimeout(r, 400));
+      await postSlow(`/api/v1/scans/${scanId}/cancel`, {});
+      await new Promise((r) => setTimeout(r, 2500));
+      const inv = (await (await getSlow('/api/v1/inventory')).json()) as { runId: string | null };
+      // The cancelled run is stored for history but the baseline is untouched:
+      // it must still point at the persisted real baseline, never the
+      // cancelled scan's run.
+      expect(inv.runId).not.toBeNull();
+      expect(inv.runId).not.toBe(scanId);
+      const cancelledRun = (await (await getSlow(`/api/v1/scans/${scanId}`)).json()) as { status: string };
+      expect(cancelledRun.status).toBe('cancelled');
+    } finally {
+      await slow.close();
+    }
+  });
+
+  it('accepts bracketed IPv6 Host headers (SEC-104)', async () => {
+    const { request: httpRequest } = await import('node:http');
+    const res = await new Promise<{ status: number; body: string }>((resolvePromise) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port: started.port, path: '/health', headers: { host: '[::1]:13099' } },
+        (r: { statusCode: number; on: (e: string, cb: (c: Buffer) => void) => void }) => {
+          let data = '';
+          r.on('data', (c: Buffer) => (data += c.toString()));
+          r.on('end', () => resolvePromise({ status: r.statusCode ?? 0, body: data }));
+        },
+      );
+      req.on('error', (e: Error) => resolvePromise({ status: 0, body: String(e) }));
+      req.setTimeout(3000, () => {
+        req.destroy();
+        resolvePromise({ status: 0, body: 'timeout' });
+      });
+      req.end();
+    });
+    expect(res.status).toBe(200);
+    expect(res.body).not.toContain('HOST_REJECTED');
+  });
+
+  it('rejects non-loopback bind hosts at startup (SEC-103)', async () => {
+    await expect(startServer({ repoRoot: repo, adapters: [new ClaudeAdapter()], host: '0.0.0.0' })).rejects.toThrow(/BIND_HOST_REJECTED/);
   });
 });

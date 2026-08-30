@@ -91,3 +91,40 @@ describe('SqliteInventoryStore (InventoryStore contract)', () => {
     }
   });
 });
+
+describe('PRI-102 retention semantics', () => {
+  it('caps successful runs at 10 regardless of age window', async () => {
+    const store = new SqliteInventoryStore(':memory:');
+    try {
+      for (let i = 0; i < 12; i++) {
+        const run: ScanRun = {
+          runId: `run-${i}`,
+          status: 'completed',
+          startedAt: new Date(Date.now() - i * 60_000).toISOString(),
+          providers: ['claude-code'],
+          counts: { added: 0, changed: 0, missing: 0, total: 0 },
+          diagnosticCounts: {},
+        };
+        await store.saveScanRun(run, [], []);
+      }
+      const runs = await store.listRuns();
+      expect(runs.length).toBe(10);
+      // Newest kept, oldest evicted.
+      expect(runs.map((r) => r.runId)).not.toContain('run-11');
+      expect(runs.map((r) => r.runId)).toContain('run-0');
+      // A cancelled run never becomes the last-successful baseline either.
+      const cancelled: ScanRun = {
+        runId: 'cancelled-1',
+        status: 'cancelled',
+        startedAt: new Date().toISOString(),
+        providers: ['claude-code'],
+        counts: { added: 0, changed: 0, missing: 0, total: 0 },
+        diagnosticCounts: {},
+      };
+      await store.saveScanRun(cancelled, [], []);
+      expect((await store.getLastSuccessfulRun())!.runId).toBe('run-0');
+    } finally {
+      store.close();
+    }
+  });
+});

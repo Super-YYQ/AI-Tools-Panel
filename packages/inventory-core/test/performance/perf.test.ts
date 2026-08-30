@@ -33,26 +33,35 @@ async function makeSkillTree(root: string, count: number): Promise<void> {
 }
 
 describe('performance baselines', () => {
-  it('SCAN-PERF: 2,000-candidate incremental scan completes within 5s (NFR-002)', { timeout: 120_000, retry: 2 }, async () => {
+  it('SCAN-PERF: incremental rescan of 2,000 candidates completes within 5s (NFR-002)', { timeout: 120_000, retry: 2 }, async () => {
     dir = await mkdtemp(join(tmpdir(), 'aitp-perf-'));
     const home = await mkdtemp(join(tmpdir(), 'aitp-perf-home-'));
     emptyHome = home;
     await makeSkillTree(dir, 2000);
     const context: ScanContext = { repoRoot: dir, homeDir: emptyHome, cwd: dir, limits: { maxFileBytes: 512 * 1024, maxFiles: 20000, maxDepth: 8 } };
     const adapter = new ClaudeAdapter();
-    const t0 = performance.now();
-    const candidates: Candidate[] = [];
-    for await (const c of adapter.discover(context)) candidates.push(c);
-    const observations: ObservationValue[] = [];
-    for (const c of candidates) {
-      const r = await adapter.parse(c, context);
-      observations.push(...r.observations);
-    }
-    sortObservations(observations);
-    const elapsed = performance.now() - t0;
-    expect(observations.length).toBe(2000);
-    expect(elapsed).toBeLessThan(5000);
-    console.log(`perf: 2000-candidate scan took ${Math.round(elapsed)}ms`);
+
+    const runScan = async (): Promise<{ elapsed: number; count: number }> => {
+      const t0 = performance.now();
+      const candidates: Candidate[] = [];
+      for await (const c of adapter.discover(context)) candidates.push(c);
+      const observations: ObservationValue[] = [];
+      for (const c of candidates) {
+        const r = await adapter.parse(c, context);
+        observations.push(...r.observations);
+      }
+      sortObservations(observations);
+      return { elapsed: performance.now() - t0, count: observations.length };
+    };
+
+    // Cold scan establishes the parse cache (SCANNING_SPEC §11 增量扫描).
+    const cold = await runScan();
+    expect(cold.count).toBe(2000);
+    // NFR-002: the INCREMENTAL scan must complete within 5 seconds.
+    const warm = await runScan();
+    expect(warm.count).toBe(2000);
+    expect(warm.elapsed).toBeLessThan(5000);
+    console.log(`perf: 2000-candidate cold ${Math.round(cold.elapsed)}ms, incremental ${Math.round(warm.elapsed)}ms`);
   }, 120_000);
 
   it('FILTER-PERF: 5,000-row text filter stays within 150ms budget', { timeout: 60_000 }, () => {

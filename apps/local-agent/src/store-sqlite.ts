@@ -2,11 +2,12 @@
  * SQLite-backed InventoryStore (ADR-011: production store behind the
  * InventoryStore interface). better-sqlite3 in synchronous mode; the app-owned
  * database lives under .aitp/ (gitignored, GIT-002).
+ * Applies the PRI-001/103 sanitization boundary and PRI-102 retention.
  */
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { sanitizeDiagnostics, sanitizeObservations } from '@aitp/inventory-core';
+import { sanitizeDiagnostics, sanitizeObservations, sanitizeProposal } from '@aitp/inventory-core';
 import type {
   AnalysisProposalValue,
   DiagnosticValue,
@@ -76,23 +77,27 @@ export class SqliteInventoryStore implements InventoryStore {
     this.pruneRetention();
   }
 
-  /** PRI-002: keep at most 10 successful/partial runs and 30 days of history. */
+  /** PRI-102: keep-set semantics — newest 10 successful/partial within 30
+   * days; failed/cancelled only the newest 5 within 3 days. Everything else
+   * (and its observations/diagnostics) is deleted. */
   private pruneRetention(): void {
-    const cut = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const keep = this.db
-      .prepare("SELECT run_id FROM scan_runs WHERE status IN ('completed','partial') ORDER BY started_at DESC LIMIT 10")
-      .all() as Array<{ run_id: string }>;
-    const keepIds = new Set(keep.map((r) => r.run_id));
-    const all = this.db.prepare("SELECT run_id, started_at, status FROM scan_runs").all() as Array<{ run_id: string; started_at: string; status: string }>;
-    const removable = all.filter((r) => (keepIds.has(r.run_id) === false || r.started_at < cut) && r.started_at < cut || (r.status !== 'completed' && r.status !== 'partial' && r.started_at < cut));
-    for (const r of removable) {
-      this.db.prepare('DELETE FROM observations WHERE run_id = ?').run(r.run_id);
-      this.db.prepare('DELETE FROM diagnostics WHERE run_id = ?').run(r.run_id);
-      this.db.prepare('DELETE FROM scan_runs WHERE run_id = ?').run(r.run_id);
-    }
-    // Also cap total runs beyond retention window even for kept statuses.
-    const stale = all.filter((r) => r.started_at < cut && !keepIds.has(r.run_id));
-    for (const r of stale) {
+    const now = Date.now();
+    const successCutoff = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const failedCutoff = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString();
+    const all = this.db.prepare('SELECT run_id, started_at, status FROM scan_runs').all() as Array<{ run_id: string; started_at: string; status: string }>;
+    const success = all
+      .filter((r) => r.status === 'completed' || r.status === 'partial')
+      .filter((r) => r.started_at >= successCutoff)
+      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      .slice(0, 10);
+    const failed = all
+      .filter((r) => r.status !== 'completed' && r.status !== 'partial')
+      .filter((r) => r.started_at >= failedCutoff)
+      .sort((a, b) => b.started_at.localeCompare(a.started_at))
+      .slice(0, 5);
+    const keep = new Set([...success, ...failed].map((r) => r.run_id));
+    for (const r of all) {
+      if (keep.has(r.run_id)) continue;
       this.db.prepare('DELETE FROM observations WHERE run_id = ?').run(r.run_id);
       this.db.prepare('DELETE FROM diagnostics WHERE run_id = ?').run(r.run_id);
       this.db.prepare('DELETE FROM scan_runs WHERE run_id = ?').run(r.run_id);
@@ -122,9 +127,10 @@ export class SqliteInventoryStore implements InventoryStore {
   }
 
   async saveProposal(proposal: AnalysisProposalValue): Promise<void> {
+    const sanitized = sanitizeProposal(proposal);
     this.db
       .prepare('INSERT OR REPLACE INTO proposals (proposal_id, artifact_id, data) VALUES (?, ?, ?)')
-      .run(proposal.proposalId, proposal.artifactId, JSON.stringify(proposal));
+      .run(sanitized.proposalId, sanitized.artifactId, JSON.stringify(sanitized));
   }
 
   async listProposals(artifactId?: string): Promise<AnalysisProposalValue[]> {

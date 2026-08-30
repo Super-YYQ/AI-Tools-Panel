@@ -17,13 +17,15 @@ import type {
 import {
   buildObservation,
   canonicalJsonHash,
-  classifyReadFailure,
   exists,
   parseFrontmatter,
-  readTextCapped,
+  readScopedTextCapped,
+  scopedReadDiagnosticCode,
   sha256Hex,
   walkBounded,
+  ParseResultCache,
 } from '@aitp/inventory-core';
+import { relative } from 'node:path';
 import { redactObject } from '@aitp/security';
 import { buildAgentsChainFromFs, isLoadedInContext, chainDirs } from './agents-chain.js';
 
@@ -31,20 +33,26 @@ export const CODEX_ADAPTER_VERSION = '1.1.0';
 export { chainDirs, buildAgentsChainFromFs, buildAgentsChainFromFs as buildAgentsChain };
 export type { AgentsChain, AgentsChainEntry } from './agents-chain.js';
 
-function readFailureDiagnostic(
-  provider: 'codex',
-  target: string,
-  kind: 'access-denied' | 'too-large' | 'missing',
-  message: string,
-): DiagnosticValue {
-  if (kind === 'access-denied') {
-    return { code: 'ACCESS_DENIED', severity: 'warning', provider, target, message, recovery: 'Grant read permission or exclude this root from scanning.' };
+/** SEC-101: scope root for a candidate — repo files bound to repoRoot, user files to homeDir. */
+function scopeRootFor(candidate: Candidate, context: ScanContext): { root: string; relPath: string } {
+  const norm = candidate.absolutePath.split('\\').join('/');
+  const repoNorm = context.repoRoot.split('\\').join('/');
+  if (norm.toLowerCase().startsWith(repoNorm.toLowerCase())) {
+    return { root: context.repoRoot, relPath: relative(context.repoRoot, candidate.absolutePath) };
   }
-  if (kind === 'too-large') {
-    return { code: 'FILE_TOO_LARGE', severity: 'warning', provider, target, message, recovery: 'Increase the configured size limit if this file must be scanned.' };
-  }
-  return { code: 'ROOT_NOT_FOUND', severity: 'info', provider, target, message, recovery: 'Verify the file exists at scan time.' };
+  return { root: context.homeDir, relPath: relative(context.homeDir, candidate.absolutePath) };
 }
+
+async function scopedRead(
+  candidate: Candidate,
+  context: ScanContext,
+): Promise<{ ok: true; text: string } | { ok: false; code: 'SYMLINK_OUTSIDE_ROOT' | 'FILE_TOO_LARGE' | 'ACCESS_DENIED' | 'ROOT_NOT_FOUND' }> {
+  const { root, relPath } = scopeRootFor(candidate, context);
+  const result = await readScopedTextCapped({ root, path: relPath });
+  if (result.ok) return { ok: true, text: result.content };
+  return { ok: false, code: scopedReadDiagnosticCode(result.code) };
+}
+
 
 function identityFromSourceField(source: unknown): SourceIdentityValue | undefined {
   if (typeof source === 'string' && /^https:\/\//.test(source)) {
@@ -131,7 +139,39 @@ export class CodexAdapter implements ProviderAdapter {
     }
   }
 
+  private readonly parseCache = new ParseResultCache();
+
+  /** SCANNING_SPEC §11: repeat scans reuse parse output keyed by path+size+mtime. */
   async parse(candidate: Candidate, context: ScanContext): Promise<ParseResult> {
+    const { stat } = await import('node:fs/promises');
+    let size = 0;
+    let mtimeMs = 0;
+    try {
+      const st = await stat(candidate.absolutePath);
+      size = st.size;
+      mtimeMs = st.mtimeMs;
+    } catch {
+      return { observations: [], diagnostics: [] };
+    }
+    const cached = this.parseCache.get(candidate.absolutePath, size, mtimeMs, this.version);
+    if (cached) {
+      return {
+        observations: cached.observations as ParseResult['observations'],
+        diagnostics: cached.diagnostics as ParseResult['diagnostics'],
+      };
+    }
+    const result = await this.parseUncached(candidate, context);
+    this.parseCache.set(candidate.absolutePath, {
+      size,
+      mtimeMs,
+      parserVersion: this.version,
+      observations: result.observations,
+      diagnostics: result.diagnostics,
+    });
+    return result;
+  }
+
+  private async parseUncached(candidate: Candidate, context: ScanContext): Promise<ParseResult> {
     const diagnostics: DiagnosticValue[] = [];
     const discoveredAt = new Date().toISOString();
     const pathToken = candidate.absolutePath.startsWith(context.repoRoot)
@@ -139,11 +179,12 @@ export class CodexAdapter implements ProviderAdapter {
       : `~/${candidate.name}`;
 
     if (candidate.kind === 'skill') {
-      const text = await readTextCapped(candidate.absolutePath);
-      if (text === undefined) {
-        diagnostics.push(readFailureDiagnostic('codex', pathToken, await classifyReadFailure(candidate.absolutePath), 'skill unreadable'));
+      const scoped = await scopedRead(candidate, context);
+      if (!scoped.ok) {
+        diagnostics.push({ code: scoped.code, severity: scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'codex', target: pathToken, message: 'skill unreadable (${scoped.code})' });
         return { observations: [], diagnostics };
       }
+      const text = scoped.text;
       const fm = parseFrontmatter(text);
       if (fm.error) diagnostics.push({ code: 'INVALID_FRONTMATTER', severity: 'warning', provider: 'codex', target: pathToken, message: fm.error });
       // PRI-02: whitelisted summary — raw frontmatter is never persisted.
@@ -162,11 +203,12 @@ export class CodexAdapter implements ProviderAdapter {
     }
 
     if (candidate.kind === 'rule-document') {
-      const text = await readTextCapped(candidate.absolutePath);
-      if (text === undefined) {
-        diagnostics.push(readFailureDiagnostic('codex', pathToken, await classifyReadFailure(candidate.absolutePath), 'rule document unreadable'));
+      const scoped = await scopedRead(candidate, context);
+      if (!scoped.ok) {
+        diagnostics.push({ code: scoped.code, severity: scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'codex', target: pathToken, message: 'rule document unreadable (${scoped.code})' });
         return { observations: [], diagnostics };
       }
+      const text = scoped.text;
       const chain = await buildAgentsChainFromFs(context);
       const loaded = isLoadedInContext(chain, candidate.absolutePath, context);
       const built = buildObservation({
@@ -187,11 +229,12 @@ export class CodexAdapter implements ProviderAdapter {
     }
 
     if (candidate.kind === 'hook') {
-      const text = await readTextCapped(candidate.absolutePath);
-      if (text === undefined) {
-        diagnostics.push(readFailureDiagnostic('codex', pathToken, await classifyReadFailure(candidate.absolutePath), 'config unreadable'));
+      const scoped = await scopedRead(candidate, context);
+      if (!scoped.ok) {
+        diagnostics.push({ code: scoped.code, severity: scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'codex', target: pathToken, message: 'config unreadable (${scoped.code})' });
         return { observations: [], diagnostics };
       }
+      const text = scoped.text;
       let config: Record<string, unknown>;
       try {
         config = parseToml(text) as Record<string, unknown>;
@@ -212,11 +255,12 @@ export class CodexAdapter implements ProviderAdapter {
     }
 
     // plugin / marketplace manifests.
-    const text = await readTextCapped(candidate.absolutePath);
-    if (text === undefined) {
-      diagnostics.push(readFailureDiagnostic('codex', pathToken, await classifyReadFailure(candidate.absolutePath), 'manifest unreadable'));
+    const scoped = await scopedRead(candidate, context);
+    if (!scoped.ok) {
+      diagnostics.push({ code: scoped.code, severity: scoped.code === 'ROOT_NOT_FOUND' ? 'info' : 'warning', provider: 'codex', target: pathToken, message: `manifest unreadable (${scoped.code})` });
       return { observations: [], diagnostics };
     }
+    const text = scoped.text;
     let manifest: Record<string, unknown>;
     try {
       manifest = candidate.absolutePath.endsWith('.toml') ? (parseToml(text) as Record<string, unknown>) : (JSON.parse(text) as Record<string, unknown>);

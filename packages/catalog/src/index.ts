@@ -184,6 +184,8 @@ export interface ApplyResult {
   applied: string[];
   conflicts: Array<{ path: string; reason: string }>;
   recovered: string[];
+  /** SEC-102: entries that could not be restored safely — journal is kept. */
+  manualRecoveryRequired: string[];
 }
 
 /**
@@ -194,6 +196,7 @@ export async function applyChangeSet(repoRoot: string, changeSet: ChangeSetValue
   const applied: string[] = [];
   const conflicts: ApplyResult['conflicts'] = [];
   const recovered: string[] = [];
+  const manualRecoveryRequired: string[] = [];
   const journal: Array<{ path: string; backup: string | null }> = [];
   const journalPath = join(repoRoot, '.aitp', `journal-${changeSet.changeSetId}.json`);
   await fs.mkdir(join(repoRoot, '.aitp'), { recursive: true });
@@ -269,19 +272,41 @@ export async function applyChangeSet(repoRoot: string, changeSet: ChangeSetValue
 
   const allOk = conflicts.length === 0 && applied.length === changeSet.changes.length;
   if (!allOk) {
-    // Roll back applied files using the journal (recovery path).
+    // SEC-102: rollback goes through SafePath like the forward path — an
+    // attacker swapping a parent directory for a junction between failure and
+    // rollback must not cause out-of-repo writes. Unsafe entries are reported
+    // as MANUAL_RECOVERY_REQUIRED and the journal is kept for inspection.
     for (const entry of [...journal].reverse()) {
-      const resolved = join(repoRoot, entry.path);
+      const safe = await resolveSafeWritePath(repoRoot, entry.path);
+      if (!safe.ok) {
+        manualRecoveryRequired.push(`${entry.path} (${safe.code})`);
+        continue;
+      }
       if (entry.backup === null) {
-        await fs.rm(resolved, { force: true });
+        await fs.rm(safe.absolute, { force: true });
+        // Rollback of a create: success means the file is gone again.
+        const verify = await resolveSafeReadPath(repoRoot, entry.path, { mode: 'file' });
+        if (verify.ok) {
+          manualRecoveryRequired.push(`${entry.path} (post-restore verify: file still present)`);
+          continue;
+        }
       } else {
-        await fs.writeFile(resolved, entry.backup, 'utf8');
+        await fs.writeFile(safe.absolute, entry.backup, 'utf8');
+        const verify = await resolveSafeReadPath(repoRoot, entry.path, { mode: 'file' });
+        if (!verify.ok) {
+          manualRecoveryRequired.push(`${entry.path} (post-restore verify: ${verify.code})`);
+          continue;
+        }
       }
       recovered.push(entry.path);
     }
   }
   await complete();
-  return { ok: allOk, applied, conflicts, recovered };
+  if (manualRecoveryRequired.length > 0) {
+    // Keep the journal so an operator can recover manually.
+    await fs.writeFile(journalPath, JSON.stringify({ status: 'manual-recovery-required', changeSetId: changeSet.changeSetId, manualRecoveryRequired }), 'utf8');
+  }
+  return { ok: allOk, applied, conflicts, recovered, manualRecoveryRequired };
 }
 
 function archiveContent(content: string): string {

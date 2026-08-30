@@ -10,7 +10,7 @@ import type {
   ObservationValue,
   ScanRun,
 } from '@aitp/contracts';
-import { sanitizeDiagnostics, sanitizeObservations } from '@aitp/inventory-core';
+import { sanitizeDiagnostics, sanitizeObservations, sanitizeProposal } from '@aitp/inventory-core';
 
 const MAX_RETAINED_RUNS = 10;
 
@@ -51,7 +51,7 @@ export class MemoryInventoryStore implements InventoryStore {
   }
 
   async saveProposal(proposal: AnalysisProposalValue): Promise<void> {
-    this.proposals.set(proposal.proposalId, proposal);
+    this.proposals.set(proposal.proposalId, sanitizeProposal(proposal));
   }
 
   async listProposals(artifactId?: string): Promise<AnalysisProposalValue[]> {

@@ -26,10 +26,13 @@ export interface PanelInstance {
  * Start a Local Agent against a fresh fixture repo with an isolated HOME so
  * only synthetic user-level assets are visible.
  */
-export async function startPanel(): Promise<PanelInstance> {
+export async function startPanel(prepare?: (repo: string) => Promise<void>): Promise<PanelInstance> {
   const repo = await mkdtemp(join(tmpdir(), 'aitp-e2e-'));
   await cp(join(fixtureSource, 'claude-repo'), repo, { recursive: true });
   await cp(join(fixtureSource, 'codex-repo'), repo, { recursive: true });
+  // REL-101: per-instance fixture preparation keeps E2E deterministic on a
+  // clean clone (e.g. creating an untracked .env that git never carries).
+  if (prepare) await prepare(repo);
   await execAsync('git', ['init', '-q'], { cwd: repo });
   await execAsync('git', ['-C', repo, 'config', 'user.email', 'e2e@example.com']);
   await execAsync('git', ['-C', repo, 'config', 'user.name', 'E2E']);

@@ -112,3 +112,24 @@ describe('reconcile statuses', () => {
     expect(JSON.stringify(r)).not.toContain('operation');
   });
 });
+
+describe('pinned revision evidence (FUN-103, ADR-009)', () => {
+  it('pinned revision requires matching observation revision — URL match alone is not a match', () => {
+    const o = obs({ sourceIdentity: { type: 'git', canonicalUrl: 'https://github.com/example/skills' } });
+    const e = entry();
+    e.entry.spec.source = { type: 'git', url: 'https://github.com/example/skills', revision: 'abc123' };
+    const r = reconcile([o], [e]);
+    // Alias matches, but the pinned revision has no observation evidence →
+    // drifted with an explicit unverified-revision diagnostic (FUN-103).
+    expect(r.items[0]!.status).toBe('drifted');
+    expect(r.items[0]!.diagnostics.some((d) => d.message.includes('unverified'))).toBe(true);
+  });
+
+  it('pinned revision with matching observation revision matches', () => {
+    const o = obs({ sourceIdentity: { type: 'git', canonicalUrl: 'https://github.com/example/skills', revision: 'abc123' } });
+    const e = entry();
+    e.entry.spec.source = { type: 'git', url: 'https://github.com/example/skills', revision: 'abc123' };
+    const r = reconcile([o], [e]);
+    expect(r.items[0]!.status).toBe('matched');
+  });
+});

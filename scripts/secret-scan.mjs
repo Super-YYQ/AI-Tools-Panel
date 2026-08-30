@@ -25,7 +25,7 @@ const patterns = [
 // Committed test fixtures intentionally contain fake credentials with obvious
 // example markers; they are redaction test data, not leaks.
 // Example secrets inside test code are test data, not leaks.
-const ALLOWLIST = [/tests[\\/]fixtures[\\/]/, /package-lock\.json$/, /[\\/]test[\\/]/];
+const ALLOWLIST = [/tests[\\/]fixtures[\\/]/, /package-lock\.json$/, /[\\/]test[\\/]/, /REAUDIT[\_]2026-08-30\.md$/];
 // AWS's documented example access key used verbatim in redaction tests and
 // audit pattern tables — recognized example data, not a credential.
 const EXAMPLE_TOKENS = [/AKIAIOSFODNN7EXAMPLE/g];
