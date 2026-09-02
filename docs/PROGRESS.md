@@ -9,12 +9,12 @@
 | 项 | Implemented | CI verified | Release verified | 证据 |
 |---|---|---|---|---|
 | REL-101 E2E 确定性（已并入 v1.0.0） | done | done（run 33321066073） | — | E2E 01–06 独立实例 |
-| PORT-101 portable 非 ASCII 路径崩溃修复 | done | 待本 push CI | — | Node 24.14 `cpSync` 无 filter 递归复制在非 ASCII 祖先路径 fail-fast（0xC0000409）；`safeCopy` no-op filter 规避；本机 `package:portable` + `verify:portable` 实测通过 |
-| PORT-102 PowerShell ExecutionPolicy | done | 待本 push CI | — | `package-portable.mjs`/`verify-portable.mjs` 加 `-ExecutionPolicy Bypass`；受限策略机器可打包/解压 |
-| M7-04 schema version + corrupt DB 演练 | done | 待本 push CI | — | `STORE_SCHEMA_VERSION` + `store_meta`；损坏 DB 备份为 `.corrupt-*.bak` 后重建（永不静默删除）；store-sqlite.test 3 个新用例 |
-| APP-002 可执行诊断 | done | 待本 push CI | — | 非 Git 仓库时面板 banner 给出原因与修复指引（i18n key `repo.notGit.*`） |
-| UI-006 键盘验收 | done | 待本 push CI | — | E2E-07：纯键盘完成扫描→编辑→diff→应用 |
-| icacls 权限测试环境误报修复 | done | 待本 push CI | — | deny ACE 先探测生效性，不生效（如 Administrator）自动跳过 |
+| PORT-101 portable 非 ASCII 路径崩溃修复 | done | done（run 33610244298） | — | Node 24.14 `cpSync` 无 filter 递归复制在非 ASCII 祖先路径 fail-fast（0xC0000409）；`safeCopy` no-op filter 规避；本机 `package:portable` + `verify:portable` 实测通过 |
+| PORT-102 PowerShell ExecutionPolicy | done | done（run 33610244298） | — | `package-portable.mjs`/`verify-portable.mjs` 加 `-ExecutionPolicy Bypass`；受限策略机器可打包/解压 |
+| M7-04 schema version + corrupt DB 演练 | done | done（run 33610244298） | — | `STORE_SCHEMA_VERSION` + `store_meta`；损坏 DB 备份为 `.corrupt-*.bak` 后重建（永不静默删除）；store-sqlite.test 3 个新用例 |
+| APP-002 可执行诊断 | done | done（run 33610244298） | — | 非 Git 仓库时面板 banner 给出原因与修复指引（i18n key `repo.notGit.*`） |
+| UI-006 键盘验收 | done | done（run 33610244298） | — | E2E-07：纯键盘完成扫描→编辑→diff→应用 |
+| icacls 权限测试环境误报修复 | done | done（run 33610244298） | — | deny ACE 先探测生效性，不生效（如 Administrator）自动跳过 |
 | 版本对齐 1.0.0 + LICENSE (MIT) + Release Notes | done | docs:check | — | 全 workspace `1.0.0`；`LICENSE`；`docs/RELEASE_NOTES_v1.0.0.md` |
 
 ## v0.1.1 RC 修复状态（复审响应，已并入 v1.0.0）
