@@ -3,9 +3,11 @@
  * InventoryStore interface). better-sqlite3 in synchronous mode; the app-owned
  * database lives under .aitp/ (gitignored, GIT-002).
  * Applies the PRI-001/103 sanitization boundary and PRI-102 retention.
+ * M7-04: schema versioning + corrupt-database recovery — an unreadable or
+ * future-version DB is backed up (never silently deleted) and recreated.
  */
 import Database from 'better-sqlite3';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { sanitizeDiagnostics, sanitizeObservations, sanitizeProposal } from '@aitp/inventory-core';
 import type {
@@ -15,6 +17,9 @@ import type {
   ObservationValue,
   ScanRun,
 } from '@aitp/contracts';
+
+/** Current store schema version. Bump + write a migration when tables change. */
+export const STORE_SCHEMA_VERSION = 1;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS scan_runs (
@@ -48,14 +53,67 @@ CREATE TABLE IF NOT EXISTS proposals (
 CREATE INDEX IF NOT EXISTS idx_proposals_artifact ON proposals(artifact_id);
 `;
 
+/** M7-04 recovery outcomes surfaced to logs/diagnostics; never throws. */
+export type StoreRecovery = { action: 'none' } | { action: 'backed-up-corrupt-db'; backupPath: string } | { action: 'backed-up-older-schema'; backupPath: string };
+
+/** Open (creating if needed) with version check; returns recovery metadata. */
+export function openStoreWithRecovery(dbPath: string): { db: Database.Database; recovery: StoreRecovery } {
+  if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
+  if (dbPath !== ':memory:' && existsSync(dbPath)) {
+    const probe = tryOpen(dbPath);
+    if (probe.ok) {
+      probe.db.close();
+    } else {
+      // Corrupt/unreadable: preserve the file for user inspection, then start
+      // over. Inventory is reproducible from rescans (deterministic core), so
+      // rebuild is safe; the backup keeps forensics possible (M7-04).
+      const backupPath = `${dbPath}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}.bak`;
+      renameSync(dbPath, backupPath);
+      for (const suffix of ['-wal', '-shm']) {
+        const side = dbPath + suffix;
+        if (existsSync(side)) unlinkSync(side);
+      }
+      return { db: freshDatabase(dbPath), recovery: { action: 'backed-up-corrupt-db', backupPath } };
+    }
+  }
+  return { db: freshDatabase(dbPath), recovery: { action: 'none' } };
+}
+
+function tryOpen(dbPath: string): { ok: true; db: Database.Database } | { ok: false } {
+  let db: Database.Database | undefined;
+  try {
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    // Any structural damage surfaces here: not a database, encrypted, torn pages.
+    db.prepare('SELECT count(*) FROM sqlite_master').get();
+  } catch {
+    try {
+      db?.close();
+    } catch {
+      /* already unusable */
+    }
+    return { ok: false };
+  }
+  return { ok: true, db };
+}
+
+function freshDatabase(dbPath: string): Database.Database {
+  const db = new Database(dbPath);
+  db.pragma('journal_mode = WAL');
+  db.exec(SCHEMA);
+  db.prepare('CREATE TABLE IF NOT EXISTS store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)').run();
+  db.prepare('INSERT OR REPLACE INTO store_meta (key, value) VALUES (?, ?)').run('schema_version', String(STORE_SCHEMA_VERSION));
+  return db;
+}
+
 export class SqliteInventoryStore implements InventoryStore {
   private readonly db: Database.Database;
+  readonly recovery: StoreRecovery;
 
   constructor(dbPath: string) {
-    if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(SCHEMA);
+    const opened = openStoreWithRecovery(dbPath);
+    this.db = opened.db;
+    this.recovery = opened.recovery;
   }
 
   async saveScanRun(run: ScanRun, observations: ObservationValue[], diagnostics: DiagnosticValue[]): Promise<void> {

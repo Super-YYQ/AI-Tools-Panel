@@ -128,6 +128,14 @@ export function App() {
           {t('offline.banner', { message: loadError ?? '' })} <button onClick={() => void refresh()}>{t('common.retry')}</button>
         </div>
       )}
+      {/* APP-002: actionable diagnosis when the working directory is not a Git repo. */}
+      {connection === 'online' && health && health.repo !== 'ok' && (
+        <div role="alert" className="banner error">
+          <strong>{t('repo.notGit.title')}</strong>
+          <p>{t('repo.notGit.diagnosis')}</p>
+          <p>{t('repo.notGit.fix')}</p>
+        </div>
+      )}
       <nav aria-label="主导航" className="nav">
         {PAGES.map(([id, label]) => (
           <button key={id} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}>

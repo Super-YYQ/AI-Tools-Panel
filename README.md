@@ -34,7 +34,11 @@ AI 不是扫描器，也不是必需依赖。关闭 AI 后，扫描、查阅、�
 
 ## 项目状态
 
-v0.1 已实现 M0–M6 核心功能：workspace scaffold、contracts、catalog/ChangeSet、inventory core、Claude/Codex adapters、Local API、Web 控制台、reconcile 与可选 enrichment。进度与已知限制见 [进度记录](docs/PROGRESS.md)。
+**v1.0.0 已发布**。M0–M7 核心功能完成：workspace scaffold、contracts、catalog/ChangeSet、inventory core、Claude/Codex adapters、Local API、Web 控制台、reconcile、安全加固与发布候选。发布内容与已知限制见 [Release Notes](docs/RELEASE_NOTES_v1.0.0.md) 与 [进度记录](docs/PROGRESS.md)。
+
+## 许可证
+
+[MIT](LICENSE)
 
 ## 快速开始（Windows）
 
@@ -77,3 +81,4 @@ npm run docs:check
 - [实施计划](docs/IMPLEMENTATION_PLAN.md)
 - [测试与完成标准](docs/TEST_STRATEGY.md)
 - [架构决策](docs/DECISIONS.md)
+- [v1.0.0 发布说明](docs/RELEASE_NOTES_v1.0.0.md)

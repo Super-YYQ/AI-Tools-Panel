@@ -1,10 +1,23 @@
 # 开发进度记录
 
-最后更新：2026-08-30（第六轮：响应 `AI_TOOLS_PANEL_LATEST_REAUDIT_2026-08-30.md`）。
+最后更新：2026-09-02（v1.0.0 发布准备：M7-04 演练、portable 非 ASCII 路径修复、APP-002 诊断、E2E-07 键盘验收）。
 
 > DOC-101：状态采用三态制——**Implemented**（代码落地，本地测试通过）/ **CI verified**（GitHub Actions 对应 job 绿）/ **Release verified**（fresh-machine 人工验收）。文档不领先于事实。
 
-## v0.1.1 RC 修复状态（复审响应）
+## v1.0.0 发布准备（2026-09-02）
+
+| 项 | Implemented | CI verified | Release verified | 证据 |
+|---|---|---|---|---|
+| REL-101 E2E 确定性（已并入 v1.0.0） | done | done（run 33321066073） | — | E2E 01–06 独立实例 |
+| PORT-101 portable 非 ASCII 路径崩溃修复 | done | 待本 push CI | — | Node 24.14 `cpSync` 无 filter 递归复制在非 ASCII 祖先路径 fail-fast（0xC0000409）；`safeCopy` no-op filter 规避；本机 `package:portable` + `verify:portable` 实测通过 |
+| PORT-102 PowerShell ExecutionPolicy | done | 待本 push CI | — | `package-portable.mjs`/`verify-portable.mjs` 加 `-ExecutionPolicy Bypass`；受限策略机器可打包/解压 |
+| M7-04 schema version + corrupt DB 演练 | done | 待本 push CI | — | `STORE_SCHEMA_VERSION` + `store_meta`；损坏 DB 备份为 `.corrupt-*.bak` 后重建（永不静默删除）；store-sqlite.test 3 个新用例 |
+| APP-002 可执行诊断 | done | 待本 push CI | — | 非 Git 仓库时面板 banner 给出原因与修复指引（i18n key `repo.notGit.*`） |
+| UI-006 键盘验收 | done | 待本 push CI | — | E2E-07：纯键盘完成扫描→编辑→diff→应用 |
+| icacls 权限测试环境误报修复 | done | 待本 push CI | — | deny ACE 先探测生效性，不生效（如 Administrator）自动跳过 |
+| 版本对齐 1.0.0 + LICENSE (MIT) + Release Notes | done | docs:check | — | 全 workspace `1.0.0`；`LICENSE`；`docs/RELEASE_NOTES_v1.0.0.md` |
+
+## v0.1.1 RC 修复状态（复审响应，已并入 v1.0.0）
 
 | 复审项 | Implemented | CI verified | Release verified | 证据 |
 |---|---|---|---|---|
@@ -27,9 +40,8 @@
 ## 验证命令与当前结果（Implemented + CI verified 层）
 
 ```powershell
-npm run verify        # lint + 真实 typecheck + 154 通过/1 平台跳过 + schema:check + build
-（CI run 33306524950 于 Windows runner 全绿：windows + e2e 双 job，含 verify:portable 解压冒烟）
-npm run test:e2e      # Playwright：6/6（独立实例）
+npm run verify        # lint + 真实 typecheck + 158 通过（含 E2E-07 前置）/1 平台跳过 + schema:check + build
+npm run test:e2e      # Playwright：7/7（独立实例，含键盘验收）
 npm run test:performance  # 增量扫描 2000 = 2.5s（<5s，冷扫 6.3s 记录在案）
 npm run secret:scan / license:report / sbom:generate / artifact:audit
 npm audit --omit=dev --audit-level=high   # 0 vulnerabilities
@@ -38,11 +50,11 @@ npm run docs:check
 
 ## REL-04 fresh-machine 人工验收清单（Release verified 层，发布阶段执行）
 
-1. Windows 11 普通用户权限 + 中文用户名/路径 → `panel-portable.ps1` 启动、扫描、编辑、apply。
+1. Windows 11 普通用户权限 + 中文用户名/路径 → `panel-portable.ps1` 启动、扫描、编辑、apply。（自动化等价物 `verify:portable` 已在本机非 ASCII 路径通过；本项仍需人工在真实 fresh 机器执行）
 2. 长路径（>260）仓库扫描。
 3. Defender 实时保护开启下的首次启动与扫描（SmartScreen 提示确认）。
 4. 无 Claude / 无 Codex / 仅其一 / 两者并存：健康端点与扫描诊断符合预期。
-5. 无 Git 仓库目录：面板给出可执行诊断（APP-002）。
+5. 无 Git 仓库目录：面板给出可执行诊断（APP-002）。（UI banner 已实现并有 E2E 覆盖样式路径；人工确认交互体验）
 
 ## 已知限制
 

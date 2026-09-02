@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile, readdir, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SqliteInventoryStore, defaultDbPath } from '../../src/store-sqlite.js';
+import { SqliteInventoryStore, defaultDbPath, STORE_SCHEMA_VERSION, openStoreWithRecovery } from '../../src/store-sqlite.js';
 import type { ObservationValue, ScanRun, DiagnosticValue, AnalysisProposalValue } from '@aitp/contracts';
 
 // M0-08 SQLite Windows spike (ADR-011) + shared store contract on a temp DB.
@@ -125,6 +125,64 @@ describe('PRI-102 retention semantics', () => {
       expect((await store.getLastSuccessfulRun())!.runId).toBe('run-0');
     } finally {
       store.close();
+    }
+  });
+});
+
+describe('M7-04 schema version + corrupt-database recovery drill', () => {
+  it('records the schema version in store_meta on a fresh database', async () => {
+    const dbPath = defaultDbPath(dir);
+    const store = new SqliteInventoryStore(dbPath);
+    try {
+      expect(store.recovery).toEqual({ action: 'none' });
+      const opened = openStoreWithRecovery(dbPath);
+      try {
+        const row = opened.db.prepare("SELECT value FROM store_meta WHERE key = 'schema_version'").get() as { value: string };
+        expect(Number(row.value)).toBe(STORE_SCHEMA_VERSION);
+      } finally {
+        opened.db.close();
+      }
+    } finally {
+      store.close();
+    }
+  });
+
+  it('recovers from a corrupt database: backs up (never deletes) and rebuilds usable store', async () => {
+    const dbPath = defaultDbPath(dir);
+    await mkdir(join(dir, '.aitp'), { recursive: true });
+    // Garbage bytes that are not a SQLite file (torn write / disk corruption).
+    await writeFile(dbPath, Buffer.from('this is not a database at all — corrupt drill payload'.repeat(40), 'utf8'));
+    const store = new SqliteInventoryStore(dbPath);
+    try {
+      expect(store.recovery.action).toBe('backed-up-corrupt-db');
+      const backupPath = store.recovery.action === 'backed-up-corrupt-db' ? store.recovery.backupPath : '';
+      expect(backupPath).toContain('.bak');
+      // The corrupt original is preserved for forensics, not silently deleted.
+      const preserved = await readFile(backupPath, 'utf8');
+      expect(preserved).toContain('corrupt drill payload');
+      // The rebuilt store is fully usable.
+      await store.saveScanRun(run, [obs], [diag]);
+      expect((await store.getLastSuccessfulRun())?.runId).toBe('run-1');
+      expect(await store.listObservations('run-1')).toEqual([obs]);
+      // Exactly one backup file was created (next to the DB under .aitp/).
+      const files = await readdir(join(dir, '.aitp'));
+      expect(files.filter((f) => f.includes('.corrupt-') && f.endsWith('.bak'))).toHaveLength(1);
+    } finally {
+      store.close();
+    }
+  });
+
+  it('opens an existing healthy database without backup or rebuild', async () => {
+    const dbPath = defaultDbPath(dir);
+    const first = new SqliteInventoryStore(dbPath);
+    await first.saveScanRun(run, [obs], []);
+    first.close();
+    const second = new SqliteInventoryStore(dbPath);
+    try {
+      expect(second.recovery).toEqual({ action: 'none' });
+      expect((await second.getLastSuccessfulRun())?.runId).toBe('run-1');
+    } finally {
+      second.close();
     }
   });
 });

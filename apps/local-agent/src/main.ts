@@ -769,7 +769,15 @@ async function openDefaultStore(repoRoot: string): Promise<InventoryStore> {
   // ADR-011: SQLite is the production store; fall back to in-memory if the
   // native binding is unavailable so the panel still starts (APP-004).
   try {
-    return new SqliteInventoryStore(defaultDbPath(repoRoot));
+    const store = new SqliteInventoryStore(defaultDbPath(repoRoot));
+    // M7-04: a corrupt DB was backed up and rebuilt — say so instead of
+    // silently losing scan history.
+    if (store.recovery.action !== 'none') {
+      console.error(
+        `inventory store recovered: ${store.recovery.action}; previous file preserved at ${store.recovery.backupPath}`,
+      );
+    }
+    return store;
   } catch {
     return new MemoryInventoryStore();
   }

@@ -1,9 +1,10 @@
 {
   "name": "ai-tools-panel",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Local-first, Git-first inventory panel for Claude Code and Codex configuration assets.",
+  "license": "MIT",
   "workspaces": [
     "packages/*",
     "apps/*"

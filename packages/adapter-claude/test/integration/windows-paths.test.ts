@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -90,26 +90,38 @@ describe('M7-02: long paths (>260 chars)', () => {
 });
 
 describe.skipIf(process.platform !== 'win32')('M7-02: restricted permissions', () => {
+  // An icacls deny ACE does not restrict Administrators (and some elevated or
+  // sandboxed contexts bypass deny entirely). Verify the deny actually takes
+  // effect on a probe file; otherwise skip — the assertions below would false-
+  // fail for an environment reason, not a scanner defect.
+  async function denyWorks(target: string, user: string, ace: string): Promise<boolean> {
+    await execAsync('icacls', [target, '/deny', ace]).catch(() => undefined);
+    try {
+      await readFile(target, 'utf8');
+      return false; // still readable → deny is ineffective for this identity
+    } catch {
+      return true; // read was refused → deny is enforced
+    } finally {
+      await execAsync('icacls', [target, '/remove:d', user]).catch(() => undefined);
+    }
+  }
+
   it('denied skill directory yields ACCESS_DENIED diagnostics without stopping siblings', async () => {
     const deniedDir = join(repo, '.claude', 'skills', 'locked-skill');
     const openDir = join(repo, '.claude', 'skills', 'open-skill');
     await mkdir(deniedDir, { recursive: true });
     await mkdir(openDir, { recursive: true });
-    await writeFile(join(deniedDir, 'SKILL.md'), skill('locked-skill'), 'utf8');
+    const lockedFile = join(deniedDir, 'SKILL.md');
+    await writeFile(lockedFile, skill('locked-skill'), 'utf8');
     await writeFile(join(openDir, 'SKILL.md'), skill('open-skill'), 'utf8');
 
     const user = process.env.USERNAME ?? 'Everyone';
-    let denyApplied = true;
-    try {
-      await execAsync('icacls', [deniedDir, '/deny', `${user}:(OI)(CI)(R)`]);
-    } catch {
-      denyApplied = false;
+    if (!(await denyWorks(lockedFile, user, `${user}:(OI)(CI)(R)`))) {
+      console.log('skip: icacls deny does not restrict this identity (e.g. Administrator)');
+      return;
     }
+    await execAsync('icacls', [deniedDir, '/deny', `${user}:(OI)(CI)(R)`]);
     try {
-      if (!denyApplied) {
-        console.log('skip: could not apply ACL deny in this environment');
-        return;
-      }
       // walkBounded surfaces the unreadable directory instead of crashing.
       const { errors } = await (async () => {
         const { walkBounded } = await import('@aitp/inventory-core');
@@ -140,17 +152,12 @@ describe.skipIf(process.platform !== 'win32')('M7-02: restricted permissions', (
     const skillFile = join(dir, 'SKILL.md');
     await writeFile(skillFile, skill('denied-file'), 'utf8');
     const user = process.env.USERNAME ?? 'Everyone';
-    let denyApplied = true;
-    try {
-      await execAsync('icacls', [skillFile, '/deny', `${user}:(R)`]);
-    } catch {
-      denyApplied = false;
+    if (!(await denyWorks(skillFile, user, `${user}:(R)`))) {
+      console.log('skip: icacls deny does not restrict this identity (e.g. Administrator)');
+      return;
     }
+    await execAsync('icacls', [skillFile, '/deny', `${user}:(R)`]);
     try {
-      if (!denyApplied) {
-        console.log('skip: could not apply ACL deny in this environment');
-        return;
-      }
       const candidate: Candidate = { provider: 'claude-code', kind: 'skill', scope: 'repo', name: 'denied-file', absolutePath: skillFile, copyRole: 'source' };
       const result = await adapter.parse(candidate, context);
       expect(result.observations).toHaveLength(0);

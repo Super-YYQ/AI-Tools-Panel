@@ -31,9 +31,15 @@ rmSync(outDir, { recursive: true, force: true });
 mkdirSync(join(outDir, 'agent'), { recursive: true });
 mkdirSync(join(outDir, 'panel'), { recursive: true });
 
+// cpSync recursive without a filter crash-fails (0xC0000409) on Windows when
+// any source ancestor path is non-ASCII (Node 24.14 fast-path bug; see
+// REL-04 fresh-machine matrix). Passing a no-op filter keeps cpSync on the
+// slow path, which handles Unicode paths correctly.
+const safeCopy = (src, dest) => cpSync(src, dest, { recursive: true, filter: () => true });
+
 // Compiled artifacts.
-cpSync(join(repoRoot, 'apps', 'local-agent', 'dist'), join(outDir, 'agent', 'dist'), { recursive: true });
-cpSync(join(repoRoot, 'apps', 'panel', 'dist'), join(outDir, 'panel', 'dist'), { recursive: true });
+safeCopy(join(repoRoot, 'apps', 'local-agent', 'dist'), join(outDir, 'agent', 'dist'));
+safeCopy(join(repoRoot, 'apps', 'panel', 'dist'), join(outDir, 'panel', 'dist'));
 
 // Production dependencies only (REL-02: better-sqlite3 prebuilt binary ships
 // with the package; target ABI is Node 22/24 x64 — re-verify on dependency upgrade).
@@ -43,14 +49,14 @@ const skip = new Set(['.bin', '.package-lock.json', '@types', 'typescript', 'esl
 let copied = 0;
 for (const name of readdirSync(join(repoRoot, 'node_modules'))) {
   if (skip.has(name)) continue;
-  cpSync(join(repoRoot, 'node_modules', name), join(prodNodeModules, name), { recursive: true });
+  safeCopy(join(repoRoot, 'node_modules', name), join(prodNodeModules, name));
   copied++;
 }
 // Scoped packages: copy individually (npm hoists them into node_modules/@scope/).
 for (const scope of readdirSync(join(repoRoot, 'node_modules')).filter((n) => n.startsWith('@'))) {
   if (skip.has(scope)) continue;
   rmSync(join(prodNodeModules, scope), { recursive: true, force: true });
-  cpSync(join(repoRoot, 'node_modules', scope), join(prodNodeModules, scope), { recursive: true });
+  safeCopy(join(repoRoot, 'node_modules', scope), join(prodNodeModules, scope));
 }
 // REL-102: @aitp/* workspace entries are npm links/junctions into packages/* —
 // they would break after extraction. Replace them with real copies of the
@@ -67,8 +73,8 @@ for (const manifestPath of ['packages/contracts', 'packages/security', 'packages
   }
   const dest = join(aitpScope, name);
   mkdirSync(dest, { recursive: true });
-  cpSync(join(pkgDir, 'package.json'), join(dest, 'package.json'));
-  cpSync(join(pkgDir, 'dist'), join(dest, 'dist'), { recursive: true });
+  safeCopy(join(pkgDir, 'package.json'), join(dest, 'package.json'));
+  safeCopy(join(pkgDir, 'dist'), join(dest, 'dist'));
 }
 console.log(`package:portable: copied ${copied}+ top-level dependency folders; @aitp/* materialized`);
 
@@ -121,7 +127,9 @@ writeFileSync(join(outDir, 'checksums.txt'), checksums + '\n', 'utf8');
 // ZIP via PowerShell (Windows-native, no extra dependency).
 const zipPath = join(repoRoot, 'release', `AI-Tools-Panel-v${version}-portable-win.zip`);
 rmSync(zipPath, { force: true });
-execFileSync('powershell', ['-NoProfile', '-Command', `Compress-Archive -Path "${outDir}" -DestinationPath "${zipPath}"`], { stdio: 'inherit' });
+// -ExecutionPolicy Bypass: restricted-policy machines (a documented REL-04
+// scenario) cannot autoload Microsoft.PowerShell.Archive otherwise.
+execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Compress-Archive -Path "${outDir}" -DestinationPath "${zipPath}"`], { stdio: 'inherit' });
 
 const size = statSync(zipPath).size;
 console.log(`package:portable: wrote ${zipPath} (${(size / 1024 / 1024).toFixed(1)} MB, ${files.length} files)`);

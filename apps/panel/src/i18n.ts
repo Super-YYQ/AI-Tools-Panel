@@ -25,6 +25,10 @@ const STRINGS: Record<Locale, Record<string, string>> = {
     'repo.recognized': '仓库已识别',
     'repo.notGit': '非 Git 仓库',
     'repo.connecting': '连接中…',
+    // APP-002: an actionable diagnosis, not just a bare label.
+    'repo.notGit.title': '当前目录不是 Git 仓库',
+    'repo.notGit.diagnosis': 'AI Tools Panel 以 Git 根识别项目。扫描仍可运行，但“目录库/变更”等基于仓库的功能将不可用。',
+    'repo.notGit.fix': '修复方式：在当前目录执行 git init，或切换到已有的 Git 仓库目录后重新启动本服务。',
     'offline.banner': '无法连接本机服务（离线或服务未运行）：{message}',
     'overview.heading': '总览',
     'overview.providers': 'Provider',

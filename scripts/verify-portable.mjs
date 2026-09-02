@@ -29,7 +29,9 @@ const extractRoot = mkdtempSync(join(tmpdir(), 'aitp-portable-verify-'));
 const extractDir = join(extractRoot, 'extracted');
 mkdirSync(extractDir, { recursive: true });
 console.log(`verify-portable: extracting ${zip}`);
-execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Path "${join(releaseDir, zip)}" -DestinationPath "${extractDir}"`]);
+// -ExecutionPolicy Bypass mirrors package-portable so restricted-policy
+// machines can load Microsoft.PowerShell.Archive for Expand-Archive.
+execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `Expand-Archive -Path "${join(releaseDir, zip)}" -DestinationPath "${extractDir}"`]);
 
 // 2. No symlink/junction anywhere in the extracted tree.
 const extracted = join(extractDir, `AI-Tools-Panel-v${JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).version}-portable`);

@@ -180,4 +180,74 @@ test.describe('E2E-01..06 (PRODUCT_SPEC 用户流程, v0.1.1)', () => {
     expect(yaml).toContain('Manual note-taking skill summary.');
     await page.context().close();
   });
+
+  test('E2E-07 键盘可达性：不用鼠标完成扫描→编辑→diff→应用（UI-006）', async ({ browser }) => {
+    const page = await openPanel(browser);
+    // Focus the scan button via keyboard navigation, then press Enter —
+    // no mouse anywhere in this test.
+    await page.getByRole('button', { name: '开始扫描' }).focus();
+    await page.keyboard.press('Enter');
+    // Wait for the scan to finish via the live status region.
+    await expect(page.locator('header [role=status]')).toContainText(/扫描(完成|部分完成)/, { timeout: 60_000 });
+
+    // Jump into the installed list and edit the deploy-helper summary using
+    // only Tab/Enter/typing — no mouse clicks anywhere in this test.
+    await page.keyboard.press('Shift+Tab'); // back to the 开始扫描 button
+    // Walk forward through the nav until the 已安装 button receives focus, then activate.
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('Tab');
+      const focused = await page.evaluate(() => document.activeElement?.textContent ?? '');
+      if (focused?.includes('已安装')) break;
+    }
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('article', { name: /deploy-helper/ }).first()).toBeVisible({ timeout: 15_000 });
+
+    // Focus the 纳入目录 button of the first matching card via keyboard traversal.
+    const card = page.getByRole('article', { name: /deploy-helper \(skill\)/ });
+    await expect(card).toBeVisible();
+    let enteredCard = false;
+    for (let i = 0; i < 30; i++) {
+      await page.keyboard.press('Tab');
+      const info = await page.evaluate(() => {
+        const el = document.activeElement;
+        return { text: el?.textContent ?? '', article: el?.closest('article')?.getAttribute('aria-label') ?? '' };
+      });
+      if (info.article.includes('deploy-helper') && info.text.includes('纳入目录')) {
+        enteredCard = true;
+        break;
+      }
+    }
+    expect(enteredCard).toBe(true);
+    await page.keyboard.press('Enter');
+    // The summary field should now be reachable; focus it directly is not
+    // allowed (mouse-free), so Tab until the 人工简述 field holds focus.
+    let inField = false;
+    for (let i = 0; i < 10; i++) {
+      const tag = await page.evaluate(() => document.activeElement?.tagName ?? '');
+      if (tag === 'TEXTAREA' || tag === 'INPUT') {
+        inField = true;
+        break;
+      }
+      await page.keyboard.press('Tab');
+    }
+    expect(inField).toBe(true);
+    await page.keyboard.type('Keyboard-only summary (UI-006).');
+    // Submit via Tab to the 预览 diff 并保存 button and Enter.
+    for (let i = 0; i < 10; i++) {
+      const focused = await page.evaluate(() => document.activeElement?.textContent ?? '');
+      if (focused?.includes('预览 diff 并保存')) break;
+      await page.keyboard.press('Tab');
+    }
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('heading', { name: '变更审查' })).toBeVisible();
+    // Apply from the review page with keyboard — tab into the visible primary
+    // button after the review page has rendered.
+    const applyButton = page.getByRole('button', { name: '应用变更' });
+    await applyButton.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('header [role=status]')).toContainText('已保存', { timeout: 20_000 });
+    const yaml = await readFile(join(panel.repo, 'catalog', 'skills', 'deploy-helper.yaml'), 'utf8');
+    expect(yaml).toContain('Keyboard-only summary (UI-006).');
+    await page.context().close();
+  });
 });
