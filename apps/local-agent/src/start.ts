@@ -1,6 +1,6 @@
 /** CLI entry: start loopback server, print session URL (APP-001/APP-003). */
 import { resolve } from 'node:path';
-import { exec } from 'node:child_process';
+import { exec, spawn } from 'node:child_process';
 import { createDefaultAdapters, startServer } from './main.js';
 
 async function main(): Promise<void> {
@@ -12,8 +12,15 @@ async function main(): Promise<void> {
   console.log(`  ${url}`);
   console.log(`Repo root: ${repoRoot}`);
   if (process.argv.includes('--open')) {
-    const openCmd = process.platform === 'win32' ? 'start' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-    exec(`${openCmd} "${url}"`);
+    if (process.platform === 'win32') {
+      // `start` must run through cmd; the empty argument reserves the window
+      // title slot so the URL is never mistaken for a title, and windowsHide
+      // keeps the helper console from flashing (User report 2026-09-02).
+      spawn('cmd', ['/c', 'start', '', url], { windowsHide: true, detached: true, stdio: 'ignore' }).unref();
+    } else {
+      const openCmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+      exec(`${openCmd} "${url}"`);
+    }
   }
   const shutdown = async () => {
     await server.close();
