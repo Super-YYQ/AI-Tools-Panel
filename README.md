@@ -21,11 +21,11 @@ AI 不是扫描器，也不是必需依赖。关闭 AI 后，扫描、查阅、�
 
 
 
-##项目状态
+## 项目状态
 
 **v1.0.0 已发布**（M0–M7 核心功能完成：workspace scaffold、contracts、catalog/ChangeSet、inventory core、Claude/Codex adapters、Local API、Web 控制台、reconcile、安全加固与发布候选；发布内容与已知限制见 [Release Notes](docs/RELEASE_NOTES_v1.0.0.md) 与 [进度记录](docs/PROGRESS.md)）。当前 main 另含 UI 重设计与静态目录站（2026-09-02 设计文档），已在 GitHub Pages 部署（2026-09-03）。
 
-##功能特性
+## 功能特性
 
 - Windows 本机运行；Claude Code 与 Codex 双适配；用户级与仓库级 Skill；
 - Plugin、Marketplace/Catalog Source、Hook；`CLAUDE.md`、`AGENTS.md` 及模块化规则；
@@ -34,7 +34,7 @@ AI 不是扫描器，也不是必需依赖。关闭 AI 后，扫描、查阅、�
 - 可选 AI 摘要、规则分类、来源候选和风险提示；确定性扫描不依赖 AI；
 - `catalog/` 可一键构建为 GitHub Pages 静态目录站（见下文）。
 
-###不在范围内
+### 不在范围内
 
 - 手机 App；启动、控制或远程操作 Claude/Codex 会话；会话记录、用量或审批面板；
 - 默认安装、卸载或执行扫描到的 Hook；自动 Git commit 或 push；
@@ -42,7 +42,7 @@ AI 不是扫描器，也不是必需依赖。关闭 AI 后，扫描、查阅、�
 
 
 
-##安装
+## 安装
 
 要求：**Node.js 22+**（含 npm）、Git。
 
@@ -62,7 +62,7 @@ npm install
 
 
 
-##快速开始（Windows）
+## 快速开始（Windows）
 
 三种启动方式任选其一：
 
@@ -81,7 +81,7 @@ npm install
 
 
 
-##配置
+## 配置
 
 - `catalog/` — 人工维护的清单数据（YAML/Markdown，面板编辑写出的内容在此；字段规则、ID、overlays、imports 见 [目录与存储规范](docs/CATALOG_SPEC.md)。
 - `sources.lock.yaml` — 面板生成的来源锁定文件（与 `catalog/` 同为仅有的两个写入根；见 [安全与 Git 边界](docs/SECURITY_AND_GIT.md)。
@@ -91,7 +91,7 @@ npm install
 
 
 
-##静态目录站（GitHub Pages）
+## 静态目录站（GitHub Pages）
 
 `catalog/` 可以渲染为一个免登录的公开静态目录站，用于展示已整理的 Skill/Plugin/规则条目：
 
@@ -114,7 +114,7 @@ npm run site:build   # 读 catalog/，输出单文件 site-dist/index.html
 
 
 
-##测试
+## 测试
 
 开发与验证命令：
 
@@ -132,13 +132,13 @@ npm run docs:check
 
 安全门与发布命令（secret 扫描、许可证报告、、SBOM、、产物审计、、portable 打包）见 [测试与完成标准](docs/TEST_STRATEGY.md)。
 
-##贡献与开发
+## 贡献与开发
 
 开发约定与工作流见 [AGENTS.md](AGENTS.md)；里程碑见 [实施计划](docs/IMPLEMENTATION_PLAN.md) 与 [进度记录](docs/PROGRESS.md)；文档变更与提交推送遵循 [安全与 Git 边界](docs/SECURITY_AND_GIT.md) 的审阅流程。
 
 
 
-##文档入口
+## 文档入口
 
 - [产品需求](docs/PRODUCT_SPEC.md)
 - [系统架构](docs/ARCHITECTURE.md)
@@ -156,12 +156,12 @@ npm run docs:check
 
 
 
-##安全策略
+## 安全策略
 
 系统把扫描内容视为不可信数据：解析不执行、凭据与个人路径始终本地脱敏、写入限定在仓库白名单位置、公开静态站采用 fail-closed 字段白名单、Git 操作只读为主（不自动 commit/push）。完整威胁模型、信任边界与安全测试门见 [docs/SECURITY_AND_GIT.md](docs/SECURITY_AND_GIT.md)。
 
 
 
-##许可证
+## 许可证
 
 本项目采用 [MIT 许可证](LICENSE)。
