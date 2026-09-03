@@ -47,16 +47,21 @@ AI 不是扫描器，也不是必需依赖。关闭 AI 后，扫描、查阅、�
 ```powershell
 git clone <repo-url>
 cd AI-Tools-Panel
-powershell -ExecutionPolicy Bypass -File scripts/panel.ps1
 ```
 
-首次运行会自动 `npm install`、构建并启动本机服务，然后打开浏览器。服务只绑定 loopback 地址；端口冲突时使用可用端口并在控制台显示。也可以手动执行：
+三种启动方式任选其一：
 
-```powershell
-npm install
-npm run build
-npm start
-```
+- **双击 `start-panel.cmd`** — 自动 `npm install`、构建、启动服务并打开浏览器（推荐日常使用）；
+- **PowerShell**：`powershell -ExecutionPolicy Bypass -File scripts/panel.ps1`；
+- **手动**：
+
+  ```powershell
+  npm install
+  npm run build
+  npm start
+  ```
+
+首次运行会自动构建并启动本机服务，然后打开浏览器。服务只绑定 loopback 地址；端口冲突时使用可用端口并在控制台显示。
 
 开发与验证命令：
 
@@ -68,6 +73,21 @@ npm run docs:check
 ```
 
 完整现有产品调研见 [调研报告](docs/research/agent-config-control-plane-landscape-2026-08-29.md)。
+
+## 静态目录站（GitHub Pages）
+
+`catalog/` 可以渲染为一个免登录的公开静态目录站，用于展示已整理的 Skill/Plugin/规则条目：
+
+```powershell
+npm run site:build   # 读 catalog/，输出单文件 site-dist/index.html
+```
+
+- 输出为**单文件** HTML（内嵌 JSON 数据 + 无依赖渲染脚本），无时间戳，同输入字节级一致；
+- 公开采用 **fail-closed 白名单**：只有名称、描述、标签、目标、许可证状态等元数据进入输出；pathToken、绝对路径、内容 hash、RuleFragment 正文、verification 数据在结构上不可达，最终 HTML 还要逐字节通过敏感信息扫描，任一命中即构建失败；
+- 无效 YAML 或重复 id 会让构建直接失败（不静默跳过）；
+- CI（`.github/workflows/site.yml`）在 `catalog/` 或 site-generator 变更推送到 main 时自动构建并部署 GitHub Pages；首次使用需在仓库 Settings → Pages 将 Source 设为 **GitHub Actions**。
+
+发布边界与脱敏策略详见 [安全与 Git 边界](docs/SECURITY_AND_GIT.md)。
 
 ## 文档入口
 

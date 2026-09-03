@@ -11,3 +11,4 @@ test-results/
 sbom.cyclonedx.json
 *.tsbuildinfo
 release/
+site-dist/

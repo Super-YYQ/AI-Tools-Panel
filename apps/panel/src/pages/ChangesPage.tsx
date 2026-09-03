@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { t } from '../i18n';
-import { Loading } from './InstalledPage';
+import { DiffView } from '../components/DiffView';
+import { EmptyState, Loading } from './InstalledPage';
 
 /** FUN-006: the Changes page shows the real, app-owned git diff (GIT-003). */
 export function ChangesPage(): React.JSX.Element {
@@ -16,40 +17,44 @@ export function ChangesPage(): React.JSX.Element {
   if (!summary) return <Loading />;
   return (
     <section aria-labelledby="ch-h">
-      <h2 id="ch-h">{t('changes.heading')}</h2>
-      <p>{t('changes.branch')}：{summary.branch || '（无）'}</p>
+      <div className="page-head">
+        <h2 id="ch-h">{t('changes.heading')}</h2>
+        <p className="page-desc">{t('changes.desc')}</p>
+      </div>
+      <p className="branch-line">
+        {t('changes.branch')}：<code>{summary.branch || t('common.none')}</code>
+      </p>
       {summary.changedFiles.length === 0 ? (
-        <p className="empty">{t('changes.none')}</p>
+        <EmptyState icon="inbox">{t('changes.none')}</EmptyState>
       ) : (
         <>
-          <table>
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>文件</th>
-              </tr>
-            </thead>
-            <tbody>
-              {summary.changedFiles.map((f, i) => (
-                <tr key={i}>
-                  <td>
-                    <code>{f.status}</code>
-                  </td>
-                  <td>
-                    <code>{f.path}</code>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>{t('changes.fileStatus')}</th>
+                  <th>{t('changes.file')}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {summary.changedFiles.map((f, i) => (
+                  <tr key={i}>
+                    <td>
+                      <span className={`badge git-${f.status}`}>{f.status}</span>
+                    </td>
+                    <td>
+                      <code>{f.path}</code>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <h3>{t('changes.diffHeading')}</h3>
           {diff && diff.diff ? (
-            <pre className="diff-view" aria-label="Git diff">
-              {diff.diff}
-              {diff.truncated ? '\n…（diff 过长，已截断。完整内容请用 git diff 查看）' : ''}
-            </pre>
+            <DiffView diff={diff.diff} ariaLabel="Git diff" footer={diff.truncated ? t('changes.truncated') : undefined} />
           ) : (
-            <p className="empty">{t('changes.noDiff')}</p>
+            <EmptyState icon="inbox">{t('changes.noDiff')}</EmptyState>
           )}
         </>
       )}

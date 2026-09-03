@@ -99,6 +99,16 @@ Hook、Skill scripts、Plugin binaries 和安装命令在 v1 只展示，不执�
 
 仓库 snapshot 使用 device alias 和 path tokens。默认不生成或提交 snapshot。
 
+### 7.1 静态目录站（site-generator）发布边界
+
+`packages/site-generator` 把 `catalog/` 渲染为公开静态站（GitHub Pages）。公开是不可逆动作，因此采用 **fail-closed 白名单** 而非黑名单脱敏：
+
+- **字段白名单投影**（§B.3）：只有 `kind/id/displayName/shortDescription/tags/targets/ownership/contentPolicy/license(status,expression)/source(type)/installInstructions/notes` 进入输出。pathToken、绝对路径、contentHash、sourceDigest、textHash、RuleFragment 正文与 frontmatter prose、verification、unknown、fieldOrigins 在结构上不可达。
+- **URL 门**：仅 `url|git` 来源的 `https://` URL 会发布；`marketplace` 只发布 `owner/name` 标识。
+- **输出全文扫描**：对最终 HTML 逐字节跑 pattern（复用 `scripts/secret-scan.mjs` 并扩展 Windows 盘符路径、`/Users/`、`%USERPROFILE%`、`<redacted:` 标记、邮箱、token 类 pattern）。任一命中即构建失败并指出条目与字段——**不静默删改**（unknown stays unknown）。
+- archived 条目不发布；无效 YAML/重复 id 构建失败。
+- 输出确定性（无时间戳）；CI `site.yml` 构建失败即不部署。
+
 ## 8. AI 与网络
 
 - AI 默认关闭；

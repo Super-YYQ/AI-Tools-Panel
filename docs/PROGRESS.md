@@ -1,8 +1,17 @@
 # 开发进度记录
 
-最后更新：2026-09-02（v1.0.0 发布准备：M7-04 演练、portable 非 ASCII 路径修复、APP-002 诊断、E2E-07 键盘验收）。
+最后更新：2026-09-02（UI 重设计 + 静态目录站 site-generator 落地；启动修复：--open 多余 cmd 窗口 + start-panel.cmd 双击启动）。
 
 > DOC-101：状态采用三态制——**Implemented**（代码落地，本地测试通过）/ **CI verified**（GitHub Actions 对应 job 绿）/ **Release verified**（fresh-machine 人工验收）。文档不领先于事实。
+
+## UI 重设计与静态目录站（2026-09-02，设计文档 §A/§B）
+
+| 项 | Implemented | CI verified | Release verified | 证据 |
+|---|---|---|---|---|
+| §A UI 重设计（设计文档 2026-09-02-ui-redesign-and-catalog-site-design.md） | done | pending | — | App 壳 grid 布局（sidebar 左栏，DOM 顺序 header→main→nav 保持键盘契约）；§A.2 GitHub Dark token 化 styles.css；Icons.tsx 16 枚 inline SVG；i18n 全页面迁移（141 keys）；DiffView 行分类着色；EmptyState。E2E 锚点全部保留，E2E 7/7 通过 |
+| §B 静态目录站 site-generator | done | pending | — | `packages/site-generator`：§B.3 SiteEntry 白名单投影、§B.4 fail-closed 安全门（条目级+最终 HTML 逐字节扫描）、确定性单文件输出；`npm run site:build`；CI `site.yml`（Pages deploy，首次需手动启用 Pages）；23 个包内测试全绿；§B.8 文档更新（README/SECURITY_AND_GIT §7.1/本文件） |
+| FIX 启动 --open 多余 cmd 窗口 | done | pending | — | `spawn('cmd', ['/c', 'start', '', url], {windowsHide:true})`，空参数占住标题槽位 |
+| FIX start-panel.cmd 双击启动 | done | pending | — | 仓库根新增 `start-panel.cmd`：node 检测→npm install→build→`node dist/start.js --open` |
 
 ## v1.0.0 发布准备（2026-09-02）
 

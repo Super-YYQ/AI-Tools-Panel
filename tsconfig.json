@@ -9,6 +9,7 @@
     { "path": "packages/adapter-claude" },
     { "path": "packages/adapter-codex" },
     { "path": "packages/enrichment" },
+    { "path": "packages/site-generator" },
     { "path": "apps/local-agent" }
   ]
 }

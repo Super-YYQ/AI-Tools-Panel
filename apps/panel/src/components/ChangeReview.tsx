@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { t } from '../i18n';
 import type { ChangeSummary } from '../api';
+import { DiffView } from './DiffView';
 
 /**
  * FUN-007 (P1-UI-03): full Change Review before any repository write.
@@ -15,28 +17,28 @@ export function ChangeReview({ summary, onApplied, onCancelled }: { summary: Cha
     setError('');
     try {
       const result = await api_apply(summary);
-      onApplied(`已保存：${result.applied.join(', ')}。请在 Git 中审阅 diff（不会自动 commit）。`);
+      onApplied(t('review.applied', { files: result.applied.join(', ') }));
     } catch (e) {
-      setError(`应用失败：${(e as Error).message}`);
+      setError(t('review.error', { message: (e as Error).message }));
       setBusy(false);
     }
   };
 
   return (
     <section aria-labelledby="review-h" className="review">
-      <h2 id="review-h">变更审查</h2>
-      <p>
-        原因：{summary.reason} · 变更集 <code>{summary.changeSetId}</code>
-      </p>
-      <p className="empty">写入只在确认后发生；apply 使用一次性 token 与 expected hash 防止覆盖外部修改。</p>
+      <div className="page-head">
+        <h2 id="review-h">{t('review.heading')}</h2>
+        <p className="page-desc">
+          {t('review.reasonLabel')}：{summary.reason} · {t('review.changeSet')} <code>{summary.changeSetId}</code>
+        </p>
+      </div>
+      <p className="note">{t('review.note')}</p>
       {summary.changes.map((c) => (
         <details key={c.repoRelativePath} open={summary.changes.length === 1}>
           <summary>
-            <code>{c.repoRelativePath}</code> — {c.operation} {c.expectedOldHash ? '（更新，含 expected hash）' : '（新建）'}
+            <code>{c.repoRelativePath}</code> — {c.operation} {c.expectedOldHash ? t('review.updateFile') : t('review.newFile')}
           </summary>
-          <pre className="diff-view" aria-label={`${c.repoRelativePath} diff`}>
-            {c.unifiedDiff || '（无差异）'}
-          </pre>
+          <DiffView diff={c.unifiedDiff} ariaLabel={`${c.repoRelativePath} diff`} emptyText={t('review.noDiff')} />
         </details>
       ))}
       {error && (
@@ -44,12 +46,12 @@ export function ChangeReview({ summary, onApplied, onCancelled }: { summary: Cha
           {error}
         </p>
       )}
-      <p>
+      <p className="review-actions">
         <button className="primary" onClick={() => void apply()} disabled={busy}>
-          {busy ? '应用中…' : '应用变更'}
+          {busy ? t('review.applying') : t('review.apply')}
         </button>{' '}
         <button onClick={onCancelled} disabled={busy}>
-          取消
+          {t('review.cancel')}
         </button>
       </p>
     </section>

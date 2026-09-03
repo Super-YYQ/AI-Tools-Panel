@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, type Observation, type ChangeSummary } from '../api';
-import { Loading } from './InstalledPage';
+import { t } from '../i18n';
+import { Icon } from '../components/Icons';
+import { EmptyState, Loading } from './InstalledPage';
 
 export function RulesPage({ inventoryKey, requestReview }: { inventoryKey: number; requestReview: (r: { summary: ChangeSummary; onApplied: (m: string) => void }) => void }): React.JSX.Element {
   const [inventory, setInventory] = useState<{ observations: Observation[] } | null>(null);
@@ -15,7 +17,10 @@ export function RulesPage({ inventoryKey, requestReview }: { inventoryKey: numbe
 
   return (
     <section aria-labelledby="rules-h">
-      <h2 id="rules-h">规则</h2>
+      <div className="page-head">
+        <h2 id="rules-h">{t('nav.rules')}</h2>
+        <p className="page-desc">{t('rules.desc')}</p>
+      </div>
       {loadError && (
         <p role="alert" className="error">
           {loadError}
@@ -23,10 +28,10 @@ export function RulesPage({ inventoryKey, requestReview }: { inventoryKey: numbe
       )}
       {!inventory && !loadError && <Loading />}
       {inventory && inventory.observations.filter((o) => o.kind === 'rule-document').length === 0 && (
-        <p className="empty">未发现规则文档。扫描后此处显示 CLAUDE.md / AGENTS.md 及模块规则。</p>
+        <EmptyState icon="rules">{t('rules.empty')}</EmptyState>
       )}
       {inventory && (
-        <ul>
+        <ul className="rule-list">
           {inventory.observations
             .filter((o) => o.kind === 'rule-document')
             .map((o) => (
@@ -56,7 +61,7 @@ function RuleDocItem({ o, requestReview }: { o: Observation; requestReview: (r: 
       setLines(content.lines);
       setEnd(String(Math.min(3, content.lines.length)));
     } catch (e) {
-      setMessage(`读取失败：${(e as Error).message}`);
+      setMessage(t('rules.readFailed', { message: (e as Error).message }));
     }
   };
 
@@ -67,7 +72,7 @@ function RuleDocItem({ o, requestReview }: { o: Observation; requestReview: (r: 
     const e = parseInt(end, 10);
     const selected = (lines ?? []).filter((l) => l.n >= s && l.n <= e);
     if (selected.length === 0) {
-      setMessage('行区间无效。');
+      setMessage(t('rules.invalidRange'));
       setBusy(false);
       return;
     }
@@ -75,7 +80,7 @@ function RuleDocItem({ o, requestReview }: { o: Observation; requestReview: (r: 
     try {
       // FUN-008: typed fragment DTO; server builds the Markdown frontmatter.
       const summary = await api.createTypedDraft({
-        reason: '保存规则片段',
+        reason: t('draft.reasonFragment'),
         entries: [],
         fragments: [
           {
@@ -91,25 +96,33 @@ function RuleDocItem({ o, requestReview }: { o: Observation; requestReview: (r: 
       requestReview({ summary, onApplied: (m) => setMessage(m.replace('已保存', '已保存规则片段')) });
       setOpen(false);
     } catch (err) {
-      setMessage(`保存失败：${(err as Error).message}`);
+      setMessage(t('common.saveFailed', { message: (err as Error).message }));
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <li>
-      <strong>{o.canonicalName}</strong> — <code>{o.location.pathToken}</code>
-      {typeof o.summary.loadedInContext === 'boolean' && <span className="badge"> {o.summary.loadedInContext ? '本次上下文加载' : '文件存在但未加载'}</span>}
-      {chain.length > 0 && <span> 加载链：{chain.filter((c) => c.selected).length} 层</span>}
-      <button
-        onClick={() => {
-          void (open ? setOpen(false) : loadContent().then(() => setOpen(true)));
-        }}
-        aria-expanded={open}
-      >
-        保存片段
-      </button>
+    <li className="rule-item">
+      <div className="rule-head">
+        <span className="kind-icon kind-rule-document">
+          <Icon name="rule-document" />
+        </span>
+        <strong>{o.canonicalName}</strong>
+        <code className="rule-path">{o.location.pathToken}</code>
+        {typeof o.summary.loadedInContext === 'boolean' && <span className="badge">{o.summary.loadedInContext ? t('rules.loaded') : t('rules.notLoaded')}</span>}
+        {chain.length > 0 && <span className="rule-chain">{t('rules.chainLayers', { n: chain.filter((c) => c.selected).length })}</span>}
+        <span className="rule-actions">
+          <button
+            onClick={() => {
+              void (open ? setOpen(false) : loadContent().then(() => setOpen(true)));
+            }}
+            aria-expanded={open}
+          >
+            {t('rules.saveFragment')}
+          </button>
+        </span>
+      </div>
       {message && (
         <p role="status" aria-live="polite">
           {message}
@@ -119,16 +132,16 @@ function RuleDocItem({ o, requestReview }: { o: Observation; requestReview: (r: 
         <div className="fragment-form">
           <pre className="lines">{lines.map((l) => `${String(l.n).padStart(4)} | ${l.text}`).join('\n')}</pre>
           <label>
-            起始行 <input value={start} onChange={(e2) => setStart(e2.target.value)} />
+            {t('rules.startLine')} <input value={start} onChange={(e2) => setStart(e2.target.value)} />
           </label>
           <label>
-            结束行 <input value={end} onChange={(e2) => setEnd(e2.target.value)} />
+            {t('rules.endLine')} <input value={end} onChange={(e2) => setEnd(e2.target.value)} />
           </label>
           <label>
-            分类 <input value={categories} onChange={(e2) => setCategories(e2.target.value)} />
+            {t('rules.categories')} <input value={categories} onChange={(e2) => setCategories(e2.target.value)} />
           </label>
           <button onClick={() => void saveFragment()} disabled={busy}>
-            {busy ? '生成中…' : '预览并保存片段'}
+            {busy ? t('common.generating') : t('rules.previewSaveFragment')}
           </button>
         </div>
       )}

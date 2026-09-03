@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, type ChangeSummary, type Observation } from '../api';
+import { t } from '../i18n';
+import { Icon, kindIcon, type IconName } from '../components/Icons';
 
 export function Loading(): React.JSX.Element {
   return <p role="status">加载中…</p>;
@@ -17,11 +19,26 @@ export function useInventory(inventoryKey: number): { inventory: import('../api'
   return { inventory, error };
 }
 
-export function StatCard({ label, value }: { label: string; value: string }): React.JSX.Element {
+export function StatCard({ label, value, icon }: { label: string; value: string; icon?: IconName }): React.JSX.Element {
   return (
     <div className="stat">
+      {icon && (
+        <span className="stat-icon">
+          <Icon name={icon} />
+        </span>
+      )}
       <div className="stat-value">{value}</div>
       <div className="stat-label">{label}</div>
+    </div>
+  );
+}
+
+/** §A.4 shared empty state: icon + hint, keeps role="status"/.empty semantics. */
+export function EmptyState({ icon = 'inbox', children, live = false }: { icon?: IconName; children: React.ReactNode; live?: boolean }): React.JSX.Element {
+  return (
+    <div className="empty" role="status" aria-live={live ? 'polite' : undefined}>
+      <Icon name={icon} size={28} className="empty-icon" />
+      <p className="empty-text">{children}</p>
     </div>
   );
 }
@@ -70,12 +87,18 @@ export function InstalledPage({ inventoryKey, requestReview }: { inventoryKey: n
 
   return (
     <section aria-labelledby="inst-h">
-      <h2 id="inst-h">已安装</h2>
+      <div className="page-head">
+        <h2 id="inst-h">{t('nav.installed')}</h2>
+        <p className="page-desc">{t('installed.desc')}</p>
+      </div>
       <div className="toolbar">
-        <input type="search" aria-label="全文搜索" placeholder="搜索…" value={rawSearch} onChange={(e) => setRawSearch(e.target.value)} />
+        <span className="search-box">
+          <Icon name="scan" size={13} className="search-icon" />
+          <input type="search" aria-label={t('installed.search')} placeholder={t('installed.searchPlaceholder')} value={rawSearch} onChange={(e) => setRawSearch(e.target.value)} />
+        </span>
         {FILTER_KEYS.map((k) => (
-          <select key={k} aria-label={`筛选 ${k}`} value={filters[k]} onChange={(e) => setFilters({ ...filters, [k]: e.target.value })}>
-            <option value="">全部 {k}</option>
+          <select key={k} aria-label={t('installed.filter', { key: k })} value={filters[k]} onChange={(e) => setFilters({ ...filters, [k]: e.target.value })}>
+            <option value="">{t('installed.all', { key: k })}</option>
             {[...new Set(inventory.observations.map((o) => (k === 'status' ? statusByKey.get(o.artifactId) : (o as never)[k])))]
               .filter(Boolean)
               .map((v) => (
@@ -85,12 +108,16 @@ export function InstalledPage({ inventoryKey, requestReview }: { inventoryKey: n
               ))}
           </select>
         ))}
-        <button onClick={() => setView(view === 'card' ? 'list' : 'card')}>{view === 'card' ? '列表视图' : '卡片视图'}</button>
+        <button onClick={() => setView(view === 'card' ? 'list' : 'card')}>{view === 'card' ? t('installed.viewList') : t('installed.viewCards')}</button>
       </div>
       {inventory.runId === null ? (
-        <p className="empty">尚未扫描。请先执行扫描。</p>
+        <EmptyState icon="scan" live>
+          {t('installed.empty')}
+        </EmptyState>
       ) : filtered.length === 0 ? (
-        <p className="empty">没有匹配当前筛选条件的资产。请调整筛选条件。</p>
+        <EmptyState icon="inbox" live>
+          {t('common.empty')}
+        </EmptyState>
       ) : view === 'card' ? (
         <div className="cards">
           {pageItems.map((o) => (
@@ -98,43 +125,50 @@ export function InstalledPage({ inventoryKey, requestReview }: { inventoryKey: n
           ))}
         </div>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>名称</th>
-              <th>类型</th>
-              <th>Provider</th>
-              <th>Scope</th>
-              <th>状态</th>
-              <th>路径</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pageItems.map((o) => (
-              <tr key={o.observationId}>
-                <td>{o.canonicalName}</td>
-                <td>{o.kind}</td>
-                <td>{o.provider}</td>
-                <td>{o.scope}</td>
-                <td>{statusByKey.get(o.artifactId) ?? 'installed-only'}</td>
-                <td>
-                  <code>{o.location.pathToken}</code>
-                </td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{t('installed.name')}</th>
+                <th>{t('installed.type')}</th>
+                <th>{t('installed.provider')}</th>
+                <th>{t('installed.scope')}</th>
+                <th>{t('installed.status')}</th>
+                <th>{t('installed.path')}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pageItems.map((o) => (
+                <tr key={o.observationId}>
+                  <td>{o.canonicalName}</td>
+                  <td>
+                    <span className={`badge kind-${o.kind}`}>
+                      <Icon name={kindIcon(o.kind)} size={11} />
+                      {o.kind}
+                    </span>
+                  </td>
+                  <td>{o.provider}</td>
+                  <td>{o.scope}</td>
+                  <td>
+                    <span className={`badge st-${statusByKey.get(o.artifactId) ?? 'installed-only'}`}>{statusByKey.get(o.artifactId) ?? 'installed-only'}</span>
+                  </td>
+                  <td>
+                    <code>{o.location.pathToken}</code>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {pageCount > 1 && (
-        <nav className="pager" aria-label="分页">
+        <nav className="pager" aria-label={t('pager.label')}>
           <button disabled={page === 0} onClick={() => setPage(page - 1)}>
-            上一页
+            {t('pager.prev')}
           </button>
-          <span>
-            第 {page + 1} / {pageCount} 页（共 {filtered.length} 项）
-          </span>
+          <span>{t('pager.info', { page: page + 1, total: pageCount, count: filtered.length })}</span>
           <button disabled={page >= pageCount - 1} onClick={() => setPage(page + 1)}>
-            下一页
+            {t('pager.next')}
           </button>
         </nav>
       )}
@@ -163,12 +197,12 @@ export function ObservationCard({ o, status, requestReview }: { o: Observation; 
     try {
       // FUN-008: typed draft — the server serializes the YAML.
       const summary = await api.createTypedDraft({
-        reason: policy === 'vendored' ? '纳入本地自定义 Skill（vendored）' : '纳入已安装资产到目录',
+        reason: policy === 'vendored' ? t('card.reasonVendored') : t('card.reasonAdd'),
         entries: [
           {
             kind: 'Skill',
             entry: {
-              metadata: { id: slug, displayName: o.canonicalName, shortDescription, tags: tags.split(/[,，\s]+/).filter(Boolean).map((t) => t.toLowerCase()) },
+              metadata: { id: slug, displayName: o.canonicalName, shortDescription, tags: tags.split(/[,，\s]+/).filter(Boolean).map((tg) => tg.toLowerCase()) },
               spec: { targets: [o.provider], source: { type: 'unknown' } },
               overlay: { notes: '' },
               verification: { sourceDigest: `sha256:${o.contentHash}` },
@@ -182,7 +216,7 @@ export function ObservationCard({ o, status, requestReview }: { o: Observation; 
       setShowForm(false);
       setVendoring(null);
     } catch (e) {
-      setMessage(`保存失败：${(e as Error).message}`);
+      setMessage(t('common.saveFailed', { message: (e as Error).message }));
     } finally {
       setBusy(false);
     }
@@ -194,27 +228,32 @@ export function ObservationCard({ o, status, requestReview }: { o: Observation; 
       const dirToken = o.location.pathToken.endsWith('.md') ? o.location.pathToken.split('/').slice(0, -1).join('/') : o.location.pathToken;
       setVendoring(await api.vendoringPreview(dirToken));
     } catch (e) {
-      setMessage(`预览失败：${(e as Error).message}`);
+      setMessage(t('card.previewFailed', { message: (e as Error).message }));
     }
   };
 
   return (
     <article className="card" aria-label={`${o.canonicalName} (${o.kind})`}>
-      <h3>{o.canonicalName}</h3>
+      <div className="card-head">
+        <span className={`kind-icon kind-${o.kind}`}>
+          <Icon name={kindIcon(o.kind)} />
+        </span>
+        <h3>{o.canonicalName}</h3>
+      </div>
       <p className="kind">
-        <span className="badge fact">{o.kind}</span> <span className="badge">{o.provider}</span> <span className="badge">{o.scope}</span>
-        {status && <span className="badge status">{status}</span>}
+        <span className={`badge kind-${o.kind}`}>{o.kind}</span> <span className="badge">{o.provider}</span> <span className="badge">{o.scope}</span>
+        {status && <span className={`badge st-${status}`}>{status}</span>}
       </p>
-      <p className="desc">{description || <em>（原始描述为空）</em>}</p>
+      <p className="desc">{description || <em>{t('card.noDesc')}</em>}</p>
       <p className="meta">
         <code>{o.location.pathToken}</code>
       </p>
-      <p>
+      <div className="card-actions">
         <button onClick={() => setShowForm(!showForm)} aria-expanded={showForm}>
-          {showForm ? '收起' : '纳入目录'}
+          {showForm ? t('card.collapse') : t('card.add')}
         </button>
-        {o.kind === 'skill' && o.scope === 'repo' && <button onClick={runVendoringPreview}>本地导入预览</button>}
-      </p>
+        {o.kind === 'skill' && o.scope === 'repo' && <button onClick={runVendoringPreview}>{t('card.importPreview')}</button>}
+      </div>
       {showForm && (
         <form
           onSubmit={(e) => {
@@ -223,24 +262,32 @@ export function ObservationCard({ o, status, requestReview }: { o: Observation; 
           }}
         >
           <label>
-            人工简述 <input value={shortDescription} onChange={(e) => setShortDescription(e.target.value)} required />
+            {t('card.humanSummary')} <input value={shortDescription} onChange={(e) => setShortDescription(e.target.value)} required />
           </label>
           <label>
-            标签（逗号分隔） <input value={tags} onChange={(e) => setTags(e.target.value)} />
+            {t('card.tags')} <input value={tags} onChange={(e) => setTags(e.target.value)} />
           </label>
           <button type="submit" disabled={busy}>
-            {busy ? '生成中…' : '预览 diff 并保存'}
+            {busy ? t('common.generating') : t('card.previewAndSave')}
           </button>
         </form>
       )}
       {vendoring && (
         <div className="vendoring">
           <p>
-            默认内容策略：<strong>{vendoring.defaultPolicy}</strong>
+            {t('card.defaultPolicy')}：<strong>{vendoring.defaultPolicy}</strong>
           </p>
-          <p>可复制文件：{vendoring.gate.allowed.length > 0 ? vendoring.gate.allowed.join(', ') : '（无）'}</p>
-          {vendoring.gate.blocked.length > 0 && <p>阻止/排除：{vendoring.gate.blocked.map((b) => `${b.path} (${b.reason})`).join(', ')}</p>}
-          <button onClick={() => void submitDraft('metadata-only')}>仅保存元数据（默认）</button>
+          <p>
+            {t('card.copyable')}
+            {vendoring.gate.allowed.length > 0 ? vendoring.gate.allowed.join(', ') : t('common.none')}
+          </p>
+          {vendoring.gate.blocked.length > 0 && (
+            <p>
+              {t('card.blocked')}
+              {vendoring.gate.blocked.map((b) => `${b.path} (${b.reason})`).join(', ')}
+            </p>
+          )}
+          <button onClick={() => void submitDraft('metadata-only')}>{t('card.metadataOnly')}</button>
         </div>
       )}
       {message && (

@@ -12,6 +12,7 @@ const alias: Record<string, string> = {
   '@aitp/adapter-claude': r('./packages/adapter-claude/src/index.ts'),
   '@aitp/adapter-codex': r('./packages/adapter-codex/src/index.ts'),
   '@aitp/enrichment': r('./packages/enrichment/src/index.ts'),
+  '@aitp/site-generator': r('./packages/site-generator/src/index.ts'),
 };
 
 const project = (name: string, patterns: string[]) => ({
